@@ -1,0 +1,19 @@
+paths:
+  raw_reviews: data/sample_reviews.json
+  bronze_reviews: data/bronze_reviews.parquet
+  topics_dir: data/topics
+  als_model_dir: data/als_model
+
+params:
+  lda_k: 5
+  lda_max_iter: 20
+  min_token_len: 2
+  stopwords_extra: ["toronto","montreal","vancouver","canada"]
+  als:
+    rank: 32
+    regParam: 0.05
+    maxIter: 10
+    coldStartStrategy: "drop"
+  eval:
+    k: 10
+    pos_thresh: 4

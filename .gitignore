@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv/
+venv/
+
+# Spark / JVM noise
+hs_err_pid*
+replay_pid*
+*.crc
+.derby/
+
+# Data & artifacts (stay local)
+data/**
+!data/README.md
+artifacts/**
+!artifacts/README.md
+mlruns/**
+logs/**
+checkpoints/**
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Local bundles / parking lot
+deps/**
+tools/**
+Archive/**      # (you already have 'Archive' folder)
+archive/**
