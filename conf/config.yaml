@@ -10,10 +10,10 @@ params:
   min_token_len: 2
   stopwords_extra: ["toronto","montreal","vancouver","canada"]
   als:
-    rank: 32
-    regParam: 0.05
-    maxIter: 10
+    rank: 16
+    regParam: 0.1
+    maxIter: 8
     coldStartStrategy: "drop"
   eval:
     k: 10
-    pos_thresh: 4
+    pos_thresh: 3.5

@@ -1,8 +1,17 @@
 # jobs/prepare_explicit_local.py
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, count
+import os
+# Point to your Hadoop folder if you have it; otherwise leave as-is for now
+os.environ.setdefault("HADOOP_HOME", r"C:\hadoop")
+os.environ["PATH"] = os.environ.get("PATH","") + os.pathsep + os.environ.get("HADOOP_HOME", r"C:\hadoop") + r"\bin"
+
 
 spark = SparkSession.builder.getOrCreate()
+# Fallback to pure-Java local FS to avoid NativeIO on Windows
+spark._jsc.hadoopConfiguration().set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
+spark._jsc.hadoopConfiguration().set("fs.file.impl.disable.cache", "true")
+
 bronze = r".\data\bronze_reviews.parquet"
 silver = r".\data\silver_explicit.parquet"
 

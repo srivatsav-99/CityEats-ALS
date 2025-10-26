@@ -1,73 +1,147 @@
-# CityEats-CA: Aspect-Aware Restaurant Recommender (Spark + GCP)
+# CityEats-CA: Aspect-Aware Restaurant Recommender (Spark + PySpark ALS)
 
-A hybrid recommender for Canadian cities (Toronto/Montreal/Vancouver) that combines:
-- Collaborative filtering (ALS) over user–restaurant interactions
-- Unsupervised topic modeling over review text (LDA)
-- Weakly/semi-supervised sentiment to weight aspects
-- Optional user/restaurant clustering for taste segments
+Hi, I’m **Srivatsav Shrikanth** — a data and ML enthusiast who loves building systems that make everyday decisions a little smarter.  
+**CityEats-CA** predicts where people are most likely to enjoy eating, starting with cities like **Toronto, Vancouver, and Montreal**.
 
-## Quickstart (Local, Small Sample)
-1) Create and activate a virtual env (or use conda), then:
+This project applies **Spark MLlib’s ALS (Alternating Least Squares)** for collaborative filtering, structured evaluation, and a full end-to-end serving flow — all built on a **local Windows Spark setup**.
+
+---
+
+## SMART Project Goal
+
+| Element | Description |
+|----------|-------------|
+| **Specific** | Build a scalable Top-N restaurant recommender using PySpark ALS on explicit user ratings. |
+| **Measurable** | Evaluate model performance using Precision@K, Recall@K, and NDCG@K. |
+| **Achievable** | Run efficiently on local Spark (Windows) without any cluster dependencies. |
+| **Relevant** | Strengthen my ML systems and data engineering skills through a real-world recommender scenario. |
+| **Time-Bound** | Completed in **October 2025** as part of **MET CS 777 – Big Data Analytics Term Project**. |
+
+---
+
+## Stack Overview
+
+| Layer | Tools |
+|-------|-------|
+| **Data Processing** | PySpark 3.5.6 · Spark SQL · Parquet |
+| **Modeling** | ALS (Alternating Least Squares) |
+| **Evaluation** | Precision@K · Recall@K · NDCG@K |
+| **Serving** | Command-line interface (`src/serving/cli.py`) |
+| **Platform** | Local Windows · Optional GCP Dataproc |
+| **Versioning** | `artifacts/runs/<timestamp>` for each trained model |
+
+---
+
+## Train & Evaluate
+
+```powershell
+$env:PYTHONPATH="$PWD"
+python .\jobs\train_als_local.py `
+  --in data\silver_explicit.parquet `
+  --out artifacts\tmp `
+  --run-dir artifacts\runs `
+  --split-mode peruser `
+  --k 10 `
+  --exclude-seen `
+  --pop-alpha 0.05 `
+  --metrics-out artifacts\metrics.json `
+  --metrics-sample-frac 1.0 `
+  --disable-batch `
+  --skip-recs-json
 ```
-pip install -r requirements.txt
+
+Artifacts and metrics are saved under `artifacts\runs\<timestamp>\`.  
+The best-performing model is stored at `artifacts\runs\best\`.
+
+---
+
+## Final Results (October 2025)
+
+| Metric @ K = 10 | Value | Interpretation |
+|------------------|--------|----------------|
+| **Precision** | 0.0021 | Around 0.21% of top-10 recommendations were relevant — expected for large, sparse data. |
+| **Recall** | 0.0017 | The model recovered about 0.17% of all relevant items per user. |
+| **NDCG** | 0.0034 | Shows good ranking differentiation after popularity re-weighting. |
+| **User Coverage** | 1.8% (≈ 2.5K of 135K users) | Indicates reasonable reach given ~20M total interactions. |
+
+**Key parameters:**  
+`rank = 32`, `regParam = 0.02`, `maxIter = 15`, `nonneg = False`, `pop_alpha = 0.05`, `pos_thresh = 3.5`
+
+---
+
+## Get Recommendations (CLI)
+
+```powershell
+python -m src.serving.cli `
+  --model-dir artifacts\runs\best\model `
+  --ui-map artifacts\runs\best\ui_map `
+  --bi-map artifacts\runs\best\bi_map `
+  --seen artifacts\runs\best\seen.parquet `
+  --user-id 41397 `
+  --k 10
 ```
-2) Run a smoke test (uses a tiny synthetic sample):
+
+### Example Output
+```json
+{
+  "user_id": "41397",
+  "items": [
+    {"business_id": 260, "score": 5.73},
+    {"business_id": 1196, "score": 5.57},
+    {"business_id": 94074, "score": 5.43},
+    {"business_id": 38881, "score": 5.38},
+    {"business_id": 121372, "score": 5.37},
+    {"business_id": 117444, "score": 5.34},
+    {"business_id": 26762, "score": 5.32},
+    {"business_id": 1, "score": 5.31},
+    {"business_id": 1210, "score": 5.30},
+    {"business_id": 89056, "score": 5.28}
+  ]
+}
 ```
-python jobs/ingest_yelp_local.py --in data/sample_reviews.json --out data/bronze_reviews.parquet
-python jobs/topic_model_local.py --in data/bronze_reviews.parquet --out data/topics
-python jobs/train_als_local.py --in data/bronze_reviews.parquet --out data/als_model
+
+---
+
+## One-Shot Run
+
+```powershell
+.\scripts\run_local.ps1 -K 10 -Frac 1.0 -PopAlpha 0.05
 ```
-Artifacts will be saved under `data/` to keep this demo self-contained.
 
-## Project layout
-- `src/common/spark_utils.py`: SparkSession helper and common conf
-- `jobs/ingest_yelp_local.py`: Reads JSON reviews -> cleans -> parquet
-- `jobs/topic_model_local.py`: LDA topic model pipeline
-- `jobs/train_als_local.py`: ALS recommender baseline + eval@K
-- `conf/config.yaml`: Centralized config (paths, params)
-- `scripts/gcp_setup.sh`: Template for GCP & Dataproc
-- `Makefile`: Handy shortcuts
+This PowerShell script automates training, metrics logging, and run management — perfect for quick experiments.
 
-## GCP (Outline)
-- Create GCS bucket, upload Yelp JSON, spin up Dataproc (v2+), then submit jobs:
-```
-gcloud dataproc clusters create ceats-cluster --region=us-central1 --single-node --image-version=2.2-debian12
-gcloud dataproc jobs submit pyspark jobs/ingest_yelp_local.py --cluster ceats-cluster --region us-central1 --   --in gs://<your-bucket>/yelp/review.json --out gs://<your-bucket>/bronze/reviews
-```
-(Replace paths; see `scripts/gcp_setup.sh` for a fuller template.)
+---
 
-## Train + serve + compare
+## Key Learnings & Takeaways
 
-# 1) Base run
-python jobs/train_als_local.py --in data/bronze_reviews.parquet --out data/als_model --run-dir data/runs --run-name base --split-seed 7
+- Learned to **debug Spark on Windows** using `RawLocalFileSystem` — an underrated but vital trick for local dev.  
+- Understood why **Precision@K can seem small yet remain meaningful** for extremely sparse recommendation data.  
+- Built a **reproducible pipeline** with proper artifact management, CLI serving, and version control.  
+- Realized that **clean engineering practices** (scripts, structure, logging) transform a course project into a **portfolio-grade ML system**.
 
-# 2) Another run
-python jobs/train_als_local.py --in data/bronze_reviews.parquet --out data/als_model --run-dir data/runs --run-name k5 --k 5 --split-seed 7
+---
 
-# 3) Build index
-python tools/collect_runs.py
-type data\runs\runs_index.csv
+## Folder Highlights
 
-# 4) (optional) sweeps
-python jobs/train_als_local.py --in data/bronze_reviews.parquet --out data/als_model --run-dir data/runs --run-name sweepA --sweep --split-seed 7
+| Path | Description |
+|------|--------------|
+| `src/common/spark_utils.py` | Spark session config + Windows compatibility fixes |
+| `jobs/train_als_local.py` | ALS training and evaluation pipeline |
+| `src/serving/cli.py` | Lightweight command-line recommender |
+| `scripts/run_local.ps1` | One-shot local run automation |
+| `artifacts/runs/best/` | Frozen model, mappings, and metrics |
 
-# 5) Pick best run
-python tools/pick_best_run.py
+---
 
-# 6) Serve a user (from a run)
-python jobs/serve_user_recs.py --run-dir data/runs --run-name base --user u3 --k 10 --format text
+## Personal Reflection
 
+What started as a class project quickly became an exploration of how **real-world ML systems come together**.  
+I learned that it’s not just about building a model — it’s about designing for reproducibility, traceability, and clarity.  
 
-## License
-MIT
+Every bug fixed and warning suppressed felt like a small win toward becoming a better engineer.  
+CityEats-CA isn’t just a recommender system — it’s a reminder of progress, persistence, and curiosity.
 
+---
 
-
-#25-10-2025
-# CityEats Recommender (PySpark ALS)
-
-Top-N restaurant recommendations using Spark MLlib (ALS) with ranking metrics (Precision@K, Recall@K, NDCG@K).  
-**Local-only folders are gitignored:** `data/`, `artifacts/`.
-
-## Quickstart
-1) Create and activate a venv, then:
+**MIT License © 2025 — Srivatsav Shrikanth**  
+_Boston University · Humber College · Toronto, ON 🇨🇦_

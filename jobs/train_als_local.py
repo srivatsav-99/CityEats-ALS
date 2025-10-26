@@ -152,7 +152,10 @@ def main(args):
 
     dfi = dfi.persist()
 
-
+    # --- NEW: keep only users with enough history to ensure non-empty truth/preds ---
+    user_stats = dfi.groupBy("user_idx").agg(F.count("*").alias("n"))
+    dfi = dfi.join(user_stats.where(F.col("n") >= 5).select("user_idx"), "user_idx", "inner")
+    # --- end NEW ---
 
     # cap k for tiny data
     num_items = dfi.select("biz_idx").distinct().count()
@@ -186,15 +189,15 @@ def main(args):
         userCol="user_idx",
         itemCol="biz_idx",
         ratingCol="stars",
-        nonnegative=True,
+        # allow negative factors → often lifts recall on explicit ratings
+        nonnegative=False,
         coldStartStrategy=conf["params"]["als"]["coldStartStrategy"],
-        rank=conf["params"]["als"]["rank"],
-        regParam=conf["params"]["als"]["regParam"],
-        maxIter=conf["params"]["als"]["maxIter"],
-        # Stability knobs for big data on single machine:
-        numUserBlocks=50,  # more, smaller user blocks #changed from 200 to 50
-        numItemBlocks=50,  # more, smaller item blocks #changed from 200 to 50
-        checkpointInterval=2,  # checkpoint every 2 iterations
+        rank=32,  # ↑ capacity
+        regParam=0.02,  # ↓ lighter regularization
+        maxIter=15,  # a few more iters
+        numUserBlocks=20,
+        numItemBlocks=20,
+        checkpointInterval=2,
         seed=1,
     )
 
@@ -342,7 +345,17 @@ def main(args):
         model = best_model
     else:
         if args.eval_only:
-            model = ALSModel.load(model_dir)
+            # --- Windows-only workaround: flip FS for model load ---
+            jconf = spark._jsc.hadoopConfiguration()
+            prev_fs = jconf.get("fs.file.impl")  # remember current setting
+            # DefaultParamsReader expects LocalFileSystem when reading metadata
+            jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
+            try:
+                model = ALSModel.load(model_dir)
+            finally:
+                # switch back to RawLocalFileSystem so parquet IO still works on Windows
+                jconf.set("fs.file.impl", prev_fs or "org.apache.hadoop.fs.RawLocalFileSystem")
+            # --- end workaround ---
         else:
             model = als.fit(train)
             model.write().overwrite().save(model_dir)
@@ -487,21 +500,35 @@ def main(args):
     # ----- Precision@K & Recall@K -----
 
     # drop seen items from top-k before computing P@K
+    cand = exploded.join(bi, on="biz_idx", how="inner")  # [user_id, business_id, pred]
+    if args.exclude_seen:
+        cand = cand.join(seen, on=["user_id", "business_id"], how="left_anti")
+
+    # --- NEW: popularity blend ---
+    pop = (train
+           .groupBy("biz_idx")
+           .agg(F.count("*").alias("cnt"))
+           .withColumn("pop_score", F.log1p(F.col("cnt"))))
+    cand_scored = (cand
+                   .join(pop.select("biz_idx", "pop_score"), on="biz_idx", how="left")
+                   .fillna({"pop_score": 0.0})
+                   .withColumn("final_pred", F.col("pred") + F.lit(args.pop_alpha) * F.col("pop_score")))
+    # Use final_pred for ranking
+    rank_col = F.col("final_pred") if args.pop_alpha and args.pop_alpha > 0 else F.col("pred")
+    # --- end NEW ---
+
+    source = cand_scored if (args.pop_alpha and args.pop_alpha > 0) else cand
     recs_topk = (
-        exploded.join(bi, on="biz_idx", how="inner")  # [user_id, business_id, pred]
-        .join(seen, on=["user_id", "business_id"], how="left_anti")
-        .groupBy("user_id")
+        source.groupBy("user_id")
         .agg(
             F.reverse(
                 F.array_sort(
-                    F.collect_list(F.struct(F.col("pred"), F.col("business_id")))
+                    F.collect_list(F.struct(rank_col.alias("score"), F.col("business_id")))
                 )
             ).alias("arr")
         )
-        .select(
-            "user_id",
-            F.expr(f"transform(slice(arr, 1, {k}), x -> x.business_id)").alias("pred_topk")
-        )
+        .select("user_id",
+                F.expr(f"transform(slice(arr, 1, {k}), x -> x.business_id)").alias("pred_topk"))
     )
 
     truth_set = truth.groupBy("user_id").agg(F.collect_set("business_id").alias("truth_set"))
@@ -515,17 +542,43 @@ def main(args):
     # keep truth_set (or at least its size) in the frame
     per_user = (
         recs_topk.join(truth_set, on="user_id", how="inner")
+        .filter(F.size("truth_set") > 0)
+        .filter(F.size("pred_topk") > 0)
         .select(
             "user_id",
             F.size(F.array_intersect(F.col("pred_topk"), F.col("truth_set"))).alias("hits"),
             F.size(F.col("truth_set")).alias("truth_size"),
+            F.size("pred_topk").alias("pred_size")
         )
-        .withColumn("prec", F.col("hits") / F.lit(k))
-        .withColumn(
-            "recall",
-            F.when(F.col("truth_size") > 0, F.col("hits") / F.col("truth_size")).otherwise(F.lit(0.0))
-        )
+        .withColumn("prec", F.col("hits") / F.least(F.lit(k), F.col("pred_size")))  # precision denom = min(k, |pred|)
+        .withColumn("recall", F.col("hits") / F.col("truth_size"))
+        .cache()
     )
+
+    # ---- DEBUG: inspect a few users' recs vs truth
+    sample_dbg = (
+        recs_topk
+        .join(truth_set, "user_id", "inner")
+        .select(
+            "user_id",
+            F.col("pred_topk"),
+            F.col("truth_set"),
+            F.size(F.array_intersect(F.col("pred_topk"), F.col("truth_set"))).alias("hits"),
+            F.size("truth_set").alias("truth_sz")
+        )
+        .orderBy(F.desc("hits"), F.desc("truth_sz"))
+        .limit(10)
+        .toPandas()
+    )
+    print("[debug] top-10 users by hits:\n", sample_dbg)
+
+    users_evalled_count = per_user.count()
+    users_with_hit_count = per_user.filter(F.col("hits") > 0).count()
+    mean_hits = per_user.select(F.avg("hits")).first()[0] or 0.0
+
+    print("[metrics] users_evalled:", users_evalled_count)
+    print("[metrics] users_with_any_hit:", users_with_hit_count)
+    print("[metrics] mean_hits_per_user:", f"{float(mean_hits):.6f}")
 
     if test.filter(F.col("stars") >= pos_thresh).limit(1).count() == 0:
         print(f"No positives in test at threshold >= {pos_thresh}. Skipping P@{k}/R@{k}.")
@@ -535,8 +588,16 @@ def main(args):
         metrics = per_user.agg(F.mean("prec").alias("p"), F.mean("recall").alias("r")).first()
         p_at_k = 0.0 if metrics is None or metrics["p"] is None else float(metrics["p"])
         r_at_k = 0.0 if metrics is None or metrics["r"] is None else float(metrics["r"])
-        print(f"Precision@{k}: {p_at_k:.4f} (demo estimate)")
-        print(f"Recall@{k}: {r_at_k:.4f} (demo estimate)")
+        denom_precision = per_user.select(F.sum(F.when(F.col("pred_size") > 0, F.lit(1)).otherwise(F.lit(0)))).first()[
+                              0] or 0
+        denom_ndcg = denom_precision  # same eligibility criterion here
+
+        def fmt(x):
+            return f"{x:.6f}"
+
+        print(f"[metrics] denom_precision: {int(denom_precision)}  denom_ndcg: {int(denom_ndcg)}")
+        print(f"Precision@{k}: {fmt(p_at_k)}")
+        print(f"Recall@{k}:    {fmt(r_at_k)}")
 
     # ----- NDCG@K (JVM-only, no Python UDF) -----
     # We already have:
@@ -586,13 +647,15 @@ def main(args):
         ndcg = 0.0
     else:
         ndcg = float(ndcg_df.agg(F.mean("ndcg").alias("ndcg")).first()["ndcg"] or 0.0)
-        print(f"NDCG@{k}: {ndcg:.4f}")
+        print(f"NDCG@{k}: {ndcg:.6f}")
     # --------------------------------------------
 
     # ---- Persist run metrics ----
     metrics_path = args.metrics_out or metrics_p
     os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
     als_cfg = conf["params"]["als"]
+
+    m = model._java_obj.parent()
 
     summary = {
         "ts": int(time.time()),
@@ -606,11 +669,11 @@ def main(args):
             "ndcg_at_k": ndcg,
         },
         "als_hparams": {
-            "rank": als_cfg["rank"],
-            "regParam": als_cfg["regParam"],
-            "maxIter": als_cfg["maxIter"],
-            "coldStartStrategy": als_cfg["coldStartStrategy"],
-            "nonnegative": True,
+            "rank": int(m.getRank()),
+            "regParam": float(m.getRegParam()),
+            "maxIter": int(m.getMaxIter()),
+            "coldStartStrategy": str(m.getColdStartStrategy()),
+            "nonnegative": bool(m.getNonnegative())
         },
         "counts": {
             "n_users": df.select("user_id").distinct().count(),
@@ -726,5 +789,7 @@ if __name__ == "__main__":
                    help="Skip writing full recs_json directory.")
     p.add_argument("--metrics-sample-frac", type=float, default=0.0,
                    help="If 0<frac<1, compute metrics on a sampled subset of users to reduce shuffle.")
+    p.add_argument("--pop-alpha", type=float, default=0.05,
+                   help="Popularity blend weight; 0 disables (default 0.05).")
 
     main(p.parse_args())
