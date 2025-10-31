@@ -17,12 +17,20 @@ st.caption("Small CSV demo while the full Spark pipeline runs in cloud. Built by
 
 # --- Sidebar: Cloud hooks ---
 st.sidebar.header("Cloud Storage")
+
 if st.sidebar.button("List cloud artifacts"):
     try:
         out = subprocess.check_output(["gcloud", "storage", "ls", "-r", f"{ARTIFACTS}/"], text=True)
-        st.sidebar.text(out if out.strip() else "(empty)")
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        if not lines:
+            st.sidebar.info("(empty)")
+        else:
+            for path in lines:
+                if path.startswith("gs://"):
+                    st.sidebar.markdown(f"- [{path}]({path})")
     except subprocess.CalledProcessError as e:
         st.sidebar.error((e.output or str(e)).strip())
+
 
 # --- Data loaders ---
 @st.cache_data
@@ -120,6 +128,23 @@ if show_idx:
     st.caption("Internal indices preview")
     with st.expander("Show merged demo frame"):
         st.dataframe(df, use_container_width=True)
+
+
+
+
+# --- Optional metrics card ---
+import json, os
+
+demo_metrics_path = "artifacts_demo/metrics.json"
+if os.path.exists(demo_metrics_path):
+    try:
+        with open(demo_metrics_path) as f:
+            m = json.load(f)
+        st.metric("Precision@10", f"{m.get('P@10', 0):.3f}")
+        st.metric("MAP@10", f"{m.get('MAP@10', 0):.3f}")
+    except Exception as e:
+        st.warning(f"Could not load metrics: {e}")
+
 
 st.divider()
 st.markdown(
