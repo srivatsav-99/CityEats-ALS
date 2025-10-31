@@ -1,37 +1,17 @@
-# Python
+.venv/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.egg-info/
-.env
-.venv/
-venv/
+# large or machine-specific things
+cityeats_best/
+artifacts/
+*.parquet
+*.snappy.parquet
+.streamlit/
 
-# Spark / JVM noise
-hs_err_pid*
-replay_pid*
-*.crc
-.derby/
-
-# Data & artifacts (stay local)
-data/**
-!data/README.md
-artifacts/**
-!artifacts/README.md
-mlruns/**
-logs/**
-checkpoints/**
-
-# OS / editors
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-.ipynb_checkpoints/
-
-# Local bundles / parking lot
-deps/**
-tools/**
-Archive/**      # (you already have 'Archive' folder)
-archive/**
+# local artifacts
+artifacts_demo/metrics.json
+src.zip
+env.mk
+recs_top10_sample_csv/
+map_user/
+map_item/
