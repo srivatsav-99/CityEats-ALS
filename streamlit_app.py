@@ -97,7 +97,7 @@ with colR:
         y_title = "Recommended item"
 
     #Table
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    st.dataframe(table, width="stretch", hide_index=True)
 
     #Chart
     chart = (
@@ -109,7 +109,7 @@ with colR:
         )
         .properties(height=300)
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart)
 
     #download
     csv_bytes = table.to_csv(index=False).encode("utf-8")
@@ -125,44 +125,38 @@ with colR:
 if show_idx:
     st.caption("Internal indices preview")
     with st.expander("Show merged demo frame"):
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
 
 
 
 
 
+def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
+    import json, pathlib
+    p = pathlib.Path(local_path)
+    if not p.exists():
+        st.info("No local metrics found yet. Use the steps below to sync a metrics file from GCS.")
+        return
 
-#Metrics panel
-st.subheader("Model metrics")
-
-import json, os, subprocess
-
-def load_metrics(local_path="artifacts_demo/metrics.json"):
-    if not os.path.exists(local_path):
-        return {}
     try:
-        with open(local_path, "r") as f:
-            return json.load(f)
+        m = json.loads(p.read_text())
     except Exception as e:
         st.warning(f"Could not parse metrics.json: {e}")
-        return {}
+        return
 
-m = load_metrics()
+    # Header
+    st.subheader("Model metrics")
 
-if not m:
-    st.info("No local metrics found yet. Use the steps below to sync a metrics file from GCS.")
-else:
     cols = st.columns(3)
     shown = False
 
-    #Ratings style metric
+    # Ratings metric
     if isinstance(m, dict) and m.get("rmse") is not None:
         cols[0].metric("RMSE (ratings)", f"{float(m['rmse']):.3f}")
         st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
-
         shown = True
 
-    #ranking-style metrics
+    # Ranking metrics (if present)
     if isinstance(m, dict) and m.get("p_at_10") is not None:
         cols[1].metric("Precision@10", f"{float(m['p_at_10']):.3f}")
         shown = True
@@ -178,6 +172,11 @@ else:
         for k in ["rank", "regParam", "alpha", "maxIter", "implicitPrefs", "coldStartStrategy"]:
             if k in m:
                 st.write(f"- **{k}**: {m[k]}")
+
+#Metrics panel
+st.subheader("Model metrics")
+
+render_metrics_from_local()
 
 
 
@@ -195,6 +194,7 @@ if st.button("Pull newest metrics.json from GCS"):
         subprocess.check_call(["gcloud","storage","cp", best_metrics, "artifacts_demo/metrics.json"])
         st.success("Pulled frozen BEST metrics.json from GCS.")
         st.caption(best_metrics)
+        render_metrics_from_local()
     except subprocess.CalledProcessError:
         #fallback - looking for a Spark part-*.json produced by a run
         try:
@@ -210,24 +210,9 @@ if st.button("Pull newest metrics.json from GCS"):
                 subprocess.check_call(["gcloud","storage","cp", ls_out, "artifacts_demo/metrics.json"])
                 st.success("Pulled latest Spark metrics part file from GCS.")
                 st.caption(ls_out)
+                render_metrics_from_local()
         except subprocess.CalledProcessError as e:
             st.error(f"Failed to pull metrics from GCS: {e}")
-
-#show metrics
-try:
-    import json, pathlib
-    mj = json.loads(pathlib.Path("artifacts_demo/metrics.json").read_text())
-    colA, colB = st.columns([1,5])
-    with colA:
-        st.metric("RMSE (ratings)", f"{mj.get('rmse', 0):.3f}")
-    with colB:
-        st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
-    with st.expander("Run details / hyperparameters"):
-        st.write(f"**rank:** {mj.get('rank','?')}")
-        st.write(f"**regParam:** {mj.get('regParam','?')}")
-        st.write(f"**maxIter:** {mj.get('maxIter','?')}")
-except Exception:
-    pass
 
 
 st.divider()
