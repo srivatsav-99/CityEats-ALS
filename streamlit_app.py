@@ -132,19 +132,63 @@ if show_idx:
 
 
 
-# --- Optional metrics card ---
-import json, os
+# --- Metrics panel (schema-aware) ---
+st.subheader("Model metrics")
 
-demo_metrics_path = "artifacts_demo/metrics.json"
-if os.path.exists(demo_metrics_path):
+import json, os, glob, subprocess
+
+def load_metrics(local_path="artifacts_demo/metrics.json"):
+    if not os.path.exists(local_path):
+        return {}
     try:
-        with open(demo_metrics_path) as f:
-            m = json.load(f)
-        st.metric("Precision@10", f"{m.get('P@10', 0):.3f}")
-        st.metric("MAP@10", f"{m.get('MAP@10', 0):.3f}")
+        with open(local_path, "r") as f:
+            return json.load(f)
     except Exception as e:
-        st.warning(f"Could not load metrics: {e}")
+        st.warning(f"Could not parse metrics.json: {e}")
+        return {}
 
+m = load_metrics()
+
+if not m:
+    st.info("No local metrics found yet. Use the steps below to sync a metrics file from GCS.")
+else:
+    cols = st.columns(3)
+    # RMSE (ratings metric)
+    if "rmse" in m:
+        cols[0].metric("RMSE (ratings)", f"{m['rmse']:.3f}")
+    # Ranking metrics (if your export + evaluator wrote them)
+    if "p_at_10" in m:
+        cols[1].metric("Precision@10", f"{m['p_at_10']:.3f}")
+    if "map_at_10" in m:
+        cols[2].metric("MAP@10", f"{m['map_at_10']:.3f}")
+
+    # Show hyperparams if present
+    with st.expander("Run details / hyperparameters"):
+        keys = ["rank", "regParam", "alpha", "maxIter", "implicitPrefs", "coldStartStrategy"]
+        for k in keys:
+            if k in m:
+                st.write(f"- **{k}**: {m[k]}")
+
+
+
+
+
+st.divider()
+st.caption("Sync latest cloud metrics")
+if st.button("Pull newest metrics.json from GCS"):
+    # Find any metrics part JSON in your artifacts tree and take the newest
+    cmd = r"""
+LATEST_PART=$(gcloud storage ls -r gs://cityeats-$USER/artifacts/**/metrics/ \
+  | grep -E '/metrics/part-.*\.json$' \
+  | sort \
+  | tail -n1) && \
+[ -n "$LATEST_PART" ] && gcloud storage cp "$LATEST_PART" artifacts_demo/metrics.json
+"""
+    rc = subprocess.call(cmd, shell=True, executable="/bin/bash")
+    if rc == 0 and os.path.exists("artifacts_demo/metrics.json"):
+        st.success("Metrics synced. Reloading…")
+        st.experimental_rerun()
+    else:
 
 st.divider()
 st.markdown(
