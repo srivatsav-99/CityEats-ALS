@@ -1,7 +1,10 @@
-install:
-	pip install -r requirements.txt
+.PHONY: demo stop
 
-smoke:
-	python jobs/ingest_yelp_local.py --in data/sample_reviews.json --out data/bronze_reviews.parquet
-	python jobs/topic_model_local.py --in data/bronze_reviews.parquet --out data/topics
-	python jobs/train_als_local.py --in data/bronze_reviews.parquet --out data/als_model
+demo:
+	@echo "Starting Streamlit on 0.0.0.0:8080..."
+	@~/.local/bin/streamlit run ~/CityEats-ALS/streamlit_app.py --server.address 0.0.0.0 --server.port 8080 --server.headless true
+
+
+stop:
+	-@fuser -k 8080/tcp 2>/dev/null || true
+	-@pkill -f streamlit 2>/dev/null || true
