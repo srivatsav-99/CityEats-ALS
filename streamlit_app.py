@@ -12,7 +12,7 @@ MAP_ITEM = "map_item/map_item.csv"
 BUCKET = f"gs://cityeats-{os.getenv('USER','sri99')}"
 ARTIFACTS = f"{BUCKET}/artifacts"
 
-st.title("CityEats-ALS — Scalable Food Recommender (Demo)")
+st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
 st.caption("Small CSV demo while the full Spark pipeline runs in cloud. Built by Srivatsav Shrikanth.")
 
 # --- Sidebar: Cloud hooks ---
@@ -132,10 +132,12 @@ if show_idx:
 
 
 
+
+
 # --- Metrics panel (schema-aware) ---
 st.subheader("Model metrics")
 
-import json, os, glob, subprocess
+import json, os, subprocess
 
 def load_metrics(local_path="artifacts_demo/metrics.json"):
     if not os.path.exists(local_path):
@@ -153,44 +155,85 @@ if not m:
     st.info("No local metrics found yet. Use the steps below to sync a metrics file from GCS.")
 else:
     cols = st.columns(3)
-    # RMSE (ratings metric)
-    if "rmse" in m:
-        cols[0].metric("RMSE (ratings)", f"{m['rmse']:.3f}")
-    # Ranking metrics (if your export + evaluator wrote them)
-    if "p_at_10" in m:
-        cols[1].metric("Precision@10", f"{m['p_at_10']:.3f}")
-    if "map_at_10" in m:
-        cols[2].metric("MAP@10", f"{m['map_at_10']:.3f}")
+    shown = False
 
-    # Show hyperparams if present
+    # Ratings-style metric
+    if isinstance(m, dict) and m.get("rmse") is not None:
+        cols[0].metric("RMSE (ratings)", f"{float(m['rmse']):.3f}")
+        st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
+
+        shown = True
+
+    # Ranking-style metrics (when produced by your evaluator)
+    if isinstance(m, dict) and m.get("p_at_10") is not None:
+        cols[1].metric("Precision@10", f"{float(m['p_at_10']):.3f}")
+        shown = True
+    if isinstance(m, dict) and m.get("map_at_10") is not None:
+        cols[2].metric("MAP@10", f"{float(m['map_at_10']):.3f}")
+        shown = True
+
+    if not shown:
+        st.caption("Raw metrics payload (no known keys like rmse/p_at_10/map_at_10 detected):")
+        st.json(m)
+
     with st.expander("Run details / hyperparameters"):
-        keys = ["rank", "regParam", "alpha", "maxIter", "implicitPrefs", "coldStartStrategy"]
-        for k in keys:
+        for k in ["rank", "regParam", "alpha", "maxIter", "implicitPrefs", "coldStartStrategy"]:
             if k in m:
                 st.write(f"- **{k}**: {m[k]}")
 
 
 
 
+import re
 
-st.divider()
-st.caption("Sync latest cloud metrics")
+st.subheader("Sync latest cloud metrics")
 if st.button("Pull newest metrics.json from GCS"):
-    # Find any metrics part JSON in your artifacts tree and take the newest
-    cmd = r"""
-LATEST_PART=$(gcloud storage ls -r gs://cityeats-$USER/artifacts/**/metrics/ \
-  | grep -E '/metrics/part-.*\.json$' \
-  | sort \
-  | tail -n1) && \
-[ -n "$LATEST_PART" ] && gcloud storage cp "$LATEST_PART" artifacts_demo/metrics.json
-"""
-    rc = subprocess.call(cmd, shell=True, executable="/bin/bash")
-    if rc == 0 and os.path.exists("artifacts_demo/metrics.json"):
-        st.success("Metrics synced. Reloading…")
-        st.experimental_rerun()
-    else:
+    user = os.getenv("USER", "sri99")
+    best_metrics = f"gs://cityeats-{user}/artifacts/runs/best/metrics/metrics.json"
+
+    try:
+        # 1) Try frozen best metrics first
+        _ = subprocess.check_output(["gcloud","storage","ls", best_metrics], text=True)
+        subprocess.check_call(["gcloud","storage","cp", best_metrics, "artifacts_demo/metrics.json"])
+        st.success("Pulled frozen BEST metrics.json from GCS.")
+        st.caption(best_metrics)
+    except subprocess.CalledProcessError:
+        # 2) Fallback: look for a Spark part-*.json produced by a run
+        try:
+            ls_out = subprocess.check_output(
+                ["bash","-lc",
+                 f"gcloud storage ls -r gs://cityeats-{user}/artifacts/**/metrics/ | grep -E 'part-.*\\.json$' | sort | tail -n1"],
+                text=True
+            ).strip()
+
+            if not ls_out:
+                st.warning("No metrics part file found in GCS (yet).")
+            else:
+                subprocess.check_call(["gcloud","storage","cp", ls_out, "artifacts_demo/metrics.json"])
+                st.success("Pulled latest Spark metrics part file from GCS.")
+                st.caption(ls_out)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Failed to pull metrics from GCS: {e}")
+
+# Show metrics
+try:
+    import json, pathlib
+    mj = json.loads(pathlib.Path("artifacts_demo/metrics.json").read_text())
+    colA, colB = st.columns([1,5])
+    with colA:
+        st.metric("RMSE (ratings)", f"{mj.get('rmse', 0):.3f}")
+    with colB:
+        st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
+    with st.expander("Run details / hyperparameters"):
+        st.write(f"**rank:** {mj.get('rank','?')}")
+        st.write(f"**regParam:** {mj.get('regParam','?')}")
+        st.write(f"**maxIter:** {mj.get('maxIter','?')}")
+except Exception:
+    pass
+
 
 st.divider()
+
 st.markdown(
 """
 **How this demo maps to the real system**
