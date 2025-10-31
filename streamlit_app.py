@@ -48,21 +48,73 @@ with colL:
     k = st.slider("Top-K", min_value=3, max_value=10, value=10, step=1)
     show_idx = st.toggle("Show internal indices", value=False)
 
+
+
+
 with colR:
     st.subheader("Top-K Recommendations")
-    df = recs.loc[recs["user_id"].eq(user)].sort_values("score", ascending=False).head(k).copy()
-    pretty = df[["item_id","score"]].copy()
-    pretty.rename(columns={"item_id":"recommended_item"}, inplace=True)
-    st.dataframe(pretty, use_container_width=True, hide_index=True)
 
-    chart = alt.Chart(df).mark_bar().encode(
-        x=alt.X("score:Q", title="Predicted score"),
-        y=alt.Y("item_id:N", sort="-x", title="Item ID")
-    ).properties(height=300)
+    # Top-K for the selected user
+    df = (
+        recs.loc[recs["user_id"].eq(user)]
+            .sort_values("score", ascending=False)
+            .head(k)
+            .copy()
+    )
+
+    # Try to find a human-readable item name column if we have one after merges
+    # (common fallbacks you might use in other datasets are included)
+    readable_item_col = next(
+        (c for c in ["item_name", "name", "business_name", "title", "item"]
+         if c in df.columns),
+        "item_id"  # fallback to internal id if no readable name exists
+    )
+
+    if show_idx:
+        # INTERNAL view: explicitly show ids
+        table = (
+            df[["user_id", "item_id", "score"]]
+            .rename(columns={
+                "user_id": "user_id (internal)",
+                "item_id": "item_id (internal)"
+            })
+        )
+        y_field = "item_id"      # chart labels
+        y_title = "Item ID (internal)"
+    else:
+        # PRETTY view: show a readable item label if we have it
+        table = (
+            df[[readable_item_col, "score"]]
+            .rename(columns={readable_item_col: "recommended_item"})
+        )
+        y_field = readable_item_col
+        y_title = "Recommended item"
+
+    # Table
+    st.dataframe(table, use_container_width=True, hide_index=True)
+
+    # Chart
+    chart = (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("score:Q", title="Predicted score"),
+            y=alt.Y(f"{y_field}:N", sort="-x", title=y_title),
+        )
+        .properties(height=300)
+    )
     st.altair_chart(chart, use_container_width=True)
 
-    csv_bytes = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download this Top-K CSV", data=csv_bytes, file_name="topk.csv", mime="text/csv")
+    # Download (respect the same columns we show in the table)
+    csv_bytes = table.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download this Top-K CSV",
+        data=csv_bytes,
+        file_name="topk.csv",
+        mime="text/csv",
+    )
+
+
 
 if show_idx:
     st.caption("Internal indices preview")
