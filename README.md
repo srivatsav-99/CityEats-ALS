@@ -217,4 +217,4 @@ CityEats-CA is more than a recommender, it’s proof that rigor and curiosity sc
 ## MIT License
 
 **MIT License © 2025 — Srivatsav Shrikanth**  
-_Boston University · Humber College · Toronto, ON 🇨🇦_
+_Boston University
