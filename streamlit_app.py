@@ -190,51 +190,61 @@ USER_ID = os.getenv("USER", "sri99")
 BEST_METRICS = f"gs://cityeats-{USER_ID}/artifacts/runs/best/metrics/metrics.json"
 
 def _run_gcloud(args):
-    """Run gcloud with --project and --quiet; return (ok, stdout)."""
+    """Run gcloud with --project and --quiet; return (ok, stdout, stderr)."""
     full = ["gcloud", "--quiet", "--project", PROJECT_ID] + args
-    # capture_output keeps banner/noise out of the Streamlit UI
     p = subprocess.run(full, capture_output=True, text=True)
-    return (p.returncode == 0, p.stdout.strip())
+    return (p.returncode == 0, (p.stdout or "").strip(), (p.stderr or "").strip())
 
 def _ensure_demo_dir():
     os.makedirs("artifacts_demo", exist_ok=True)
 
 def _latest_part_metrics():
-    """Return latest part-*.json metrics path (or '') by listing and filtering in Python."""
-    ok, out = _run_gcloud(["storage", "ls", "--recursive",
-                           f"gs://cityeats-{USER_ID}/artifacts/"])
-    if not ok or not out:
-        return ""
+    """
+    Return (status, path_or_msg). If status is True, value is the latest part-*.json path.
+    If False, value is an error message from gcloud (stderr/stdout).
+    """
+    ok, out, err = _run_gcloud(["storage", "ls", "--recursive",
+                                f"gs://cityeats-{USER_ID}/artifacts/"])
+    if not ok:
+        return False, (err or out or "gcloud ls failed (no details)")
     candidates = []
     for line in out.splitlines():
         s = line.strip()
         if s.endswith(".json") and "/metrics/" in s and "part-" in s:
             candidates.append(s)
-    # gcloud already returns sorted-ish; we pick the last lexicographically
-    return sorted(candidates)[-1] if candidates else ""
+    if not candidates:
+        return False, "No metrics part file found in GCS (yet)."
+    return True, sorted(candidates)[-1]
 
 if st.button("Pull newest metrics.json from GCS"):
     _ensure_demo_dir()
 
-    # 1) Try frozen best metrics first
-    ok, _ = _run_gcloud(["storage", "cp", BEST_METRICS, "artifacts_demo/metrics.json"])
+    #frozen best metrics
+    ok, _, err = _run_gcloud(["storage", "cp", BEST_METRICS, "artifacts_demo/metrics.json"])
     if ok:
         st.success("Pulled frozen BEST metrics.json from GCS.")
         st.caption(BEST_METRICS)
         render_metrics_from_local()
     else:
-        # 2) Fall back to the most recent Spark part-*.json
-        part = _latest_part_metrics()
-        if not part:
-            st.warning("No metrics part file found in GCS (yet).")
-        else:
-            ok2, _ = _run_gcloud(["storage", "cp", part, "artifacts_demo/metrics.json"])
+        #Fall back to latest Spark part-*.json
+        status, val = _latest_part_metrics()
+        if status:
+            part = val
+            ok2, _, err2 = _run_gcloud(["storage", "cp", part, "artifacts_demo/metrics.json"])
             if ok2:
                 st.success("Pulled latest Spark metrics part file from GCS.")
                 st.caption(part)
                 render_metrics_from_local()
             else:
-                st.error("Failed to pull metrics from GCS. Make sure you’re authenticated and the bucket exists.")
+                st.error("Failed to copy metrics from GCS (part-*.json).")
+                st.caption(err2 or "No error text from gcloud.")
+        else:
+            
+            if "No metrics part file" in val:
+                st.warning(val)
+            else:
+                st.error("Failed to list metrics in GCS.")
+                st.caption(val)
 
 
 
