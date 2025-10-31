@@ -218,3 +218,22 @@ CityEats-CA is more than a recommender, it’s proof that rigor and curiosity sc
 
 **MIT License © 2025 — Srivatsav Shrikanth**  
 _Boston University
+
+---
+
+## Infrastructure & Cost Summary (GCP Dataproc Deployment)
+
+| Component | Configuration | Notes |
+|------------|----------------|-------|
+| **Platform** | Google Cloud Platform (GCP) | Managed services used for compute and storage |
+| **Cluster Type** | Dataproc single-node (n2-standard-4) | 4 vCPUs · 16 GB RAM |
+| **Job Runtime** | ~21 minutes | Includes data load, ALS training, evaluation, and artifact export |
+| **Storage** | GCS Bucket — `gs://cityeats-sri99/artifacts/` | Stores models, mappings, and run metrics |
+| **Artifacts Size** | ≈ 0.6 GB | Includes model parquet files and JSON metrics |
+| **Compute Cost** | ≈ **$0.11 USD** | Based on on-demand rate for single node (21 min) |
+| **Storage Cost** | ≈ **$0.02 USD/month** | For persistent artifacts and metrics |
+| **Total Project Cost** | **<$0.15 USD/run** | Highly optimized end-to-end workflow |
+
+> **Optimization:** Adaptive Query Execution (AQE) was enabled with shuffle parallelism=64 for balanced Spark performance during ALS training.
+
+---
