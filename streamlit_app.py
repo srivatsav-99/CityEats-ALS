@@ -174,7 +174,6 @@ def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
                 st.write(f"- **{k}**: {m[k]}")
 
 #Metrics panel
-st.subheader("Model metrics")
 
 render_metrics_from_local()
 
@@ -183,36 +182,64 @@ render_metrics_from_local()
 
 import re
 
+#Sync latest cloud metrics
 st.subheader("Sync latest cloud metrics")
+
+def _gcloud_env():
+    #Force project inside subprocesses; inherit current env otherwise
+    env = os.environ.copy()
+    env["CLOUDSDK_CORE_PROJECT"] = "sri99-cs777" 
+    
+    env["CLOUDSDK_CORE_DISABLE_PROMPTS"] = "1"
+    env["TERM"] = "dumb"
+    return env
+
 if st.button("Pull newest metrics.json from GCS"):
     user = os.getenv("USER", "sri99")
     best_metrics = f"gs://cityeats-{user}/artifacts/runs/best/metrics/metrics.json"
 
     try:
-        #trying frozen best metrics first
-        _ = subprocess.check_output(["gcloud","storage","ls", best_metrics], text=True)
-        subprocess.check_call(["gcloud","storage","cp", best_metrics, "artifacts_demo/metrics.json"])
+        #try frozen best first
+        subprocess.check_call(
+            ["gcloud", "storage", "cp", best_metrics, "artifacts_demo/metrics.json"],
+            env=_gcloud_env(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         st.success("Pulled frozen BEST metrics.json from GCS.")
         st.caption(best_metrics)
         render_metrics_from_local()
     except subprocess.CalledProcessError:
-        #fallback - looking for a Spark part-*.json produced by a run
+        #fall back to the latest Spark part-*.json
         try:
+            ls_cmd = (
+                f"gcloud storage ls -r gs://cityeats-{user}/artifacts/**/metrics/ "
+                r"| grep -E 'part-.*\.json$' | sort | tail -n1"
+            )
             ls_out = subprocess.check_output(
-                ["bash","-lc",
-                 f"gcloud storage ls -r gs://cityeats-{user}/artifacts/**/metrics/ | grep -E 'part-.*\\.json$' | sort | tail -n1"],
-                text=True
+                ["bash", "-lc", ls_cmd],
+                env=_gcloud_env(),
+                text=True,
+                stderr=subprocess.DEVNULL,
             ).strip()
 
             if not ls_out:
                 st.warning("No metrics part file found in GCS (yet).")
             else:
-                subprocess.check_call(["gcloud","storage","cp", ls_out, "artifacts_demo/metrics.json"])
+                subprocess.check_call(
+                    ["gcloud", "storage", "cp", ls_out, "artifacts_demo/metrics.json"],
+                    env=_gcloud_env(),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 st.success("Pulled latest Spark metrics part file from GCS.")
                 st.caption(ls_out)
                 render_metrics_from_local()
+
         except subprocess.CalledProcessError as e:
-            st.error(f"Failed to pull metrics from GCS: {e}")
+            st.error("Failed to pull metrics from GCS. Make sure you’re authenticated and the bucket exists.")
+            st.caption(str(e))
+
 
 
 st.divider()
