@@ -1,4 +1,4 @@
-# jobs/debug_counts.py
+#jobs/debug_counts.py
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import countDistinct
 
@@ -12,6 +12,6 @@ for c in ["user_id","item_id","rating","timestamp"]:
 df.select(countDistinct("user_id").alias("users"),
           countDistinct("item_id").alias("items")).show()
 
-# Show a tiny sample to verify columns
+#showing a tiny sample to verify columns
 df.select("user_id","item_id","rating").limit(10).show()
 spark.stop()

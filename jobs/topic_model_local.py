@@ -21,12 +21,12 @@ def main(args):
     pipe = Pipeline(stages=[tokenizer, remover, cv, lda])
     model = pipe.fit(df)
     lda_model = model.stages[-1]
-    vocab = model.stages[2].vocabulary  # from CountVectorizer
+    vocab = model.stages[2].vocabulary  #from CountVectorizer
 
     topics = lda_model.describeTopics()
     top_terms = topics.select("topic", F.expr("slice(termIndices, 1, 10)").alias("termIndices")).collect()
 
-    # Save topics as text (simple)
+    #save topics as text
     os_out = args.out_path
     (spark.createDataFrame(
         [(int(t.topic), [vocab[i] for i in t.termIndices]) for t in top_terms],

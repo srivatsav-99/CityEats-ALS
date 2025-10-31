@@ -3,7 +3,7 @@ from pyspark.ml.recommendation import ALSModel
 from pyspark.sql import functions as F
 from src.common.spark_utils import get_spark
 
-# ---- Local copy to avoid import cycles; identical signature to train_als_local.py ----
+#local copy to avoid import cycles
 def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
                     user_id, k=10, seen_df=None, format="text", outfile=None):
     import pyspark.sql.functions as F
@@ -46,7 +46,7 @@ def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
                 f.write(msg + "\n")
         return
 
-    # Build output once
+    #build output once
     if format == "json":
         payload = {
             "user_id": user_id,
@@ -68,14 +68,13 @@ def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(out + ("\n" if not out.endswith("\n") else ""))
 
-# -----------------------------------------------------------------------------
 
 def _assert_dir(pth, label):
     if not os.path.isdir(pth):
         sys.exit(f"[serve] missing {label}: {pth}")
 
 def main(args):
-    # Decide base run folder
+    #Decide base run folder
     if args.use_best:
         base = "data/best_run"
     elif args.run_name:
@@ -87,25 +86,25 @@ def main(args):
         else:
             sys.exit("[serve] Provide --run-name or create data/best_run (run tools/pick_best_run.py)")
 
-    # Artifacts
+    #artifacts
     model_dir = os.path.join(base, "model")
     ui_dir    = os.path.join(base, "ui_map")
     bi_dir    = os.path.join(base, "bi_map")
     seen_path = os.path.join(base, "seen.parquet")
 
-    # Sanity checks before spinning up Spark jobs
+    #checks before spinning up Spark jobs
     _assert_dir(model_dir, "model_dir")
     _assert_dir(ui_dir, "ui_map")
     _assert_dir(bi_dir, "bi_map")
 
     spark = get_spark("Serve-ALS")
 
-    # Optional seen filter
+    #seen filter
     seen_df = None
     if args.exclude_seen and os.path.isdir(seen_path):
         seen_df = spark.read.parquet(seen_path).select("user_id", "business_id").distinct()
 
-    # Print recs
+    #print recs
     print_user_recs(
         spark,
         model_path=model_dir,

@@ -15,8 +15,8 @@ def main():
     args = ap.parse_args()
 
     spark = SparkSession.builder.appName("CityEats-CLI").getOrCreate()
-    ui = spark.read.parquet(args.ui_map)   # user_id, user_idx
-    bi = spark.read.parquet(args.bi_map)   # business_id, biz_idx
+    ui = spark.read.parquet(args.ui_map)   #user_id, user_idx
+    bi = spark.read.parquet(args.bi_map)   #business_id, biz_idx
     model = ALSModel.load(args.model-dir if hasattr(args, 'model-dir') else args.model_dir)
 
     u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")

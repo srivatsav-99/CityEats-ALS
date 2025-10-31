@@ -49,7 +49,7 @@ def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
                 f.write(msg + "\n")
         return
 
-    # Build output string once
+    #Build output string once
     if format == "json":
         payload = {
             "user_id": user_id,
@@ -66,7 +66,7 @@ def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
         lines += [f"{i:>2}. {b}  (score={s:.4f})" for i, (b, s) in enumerate(rows, 1)]
         out = "\n".join(lines)
 
-    # Print and/or write
+    #print and/or write
     print(out)
     if outfile:
         with open(outfile, "w", encoding="utf-8") as f:
@@ -76,8 +76,8 @@ def print_user_recs(spark, model_path, ui_map_path, bi_map_path,
 
 
 def precision_at_k(pred, truth, k=10):
-    # pred: user_id, recs (array<struct<business_id:string, rating:double>>)
-    # truth: user_id, business_id (held-out positives)
+    #pred: user_id, recs (array<struct<business_id:string, rating:double>>)
+    #truth: user_id, business_id (held-out positives)
     exploded = pred.select("user_id", F.expr(f"slice(recommendations, 1, {k}) as topk"))
     exploded = exploded.select("user_id", F.explode("topk.business_id").alias("business_id"))
     joined = exploded.join(truth, on=["user_id","business_id"], how="left_semi")
@@ -94,7 +94,7 @@ def main(args):
     with open("conf/config.yaml","r") as f:
         conf = yaml.safe_load(f)
 
-    # evaluation params
+    #evaluation params
     k_cfg = conf["params"]["eval"]["k"]
     pos_thresh = conf["params"]["eval"]["pos_thresh"]  #updated to read from yaml rather than hard coding
 
@@ -103,7 +103,7 @@ def main(args):
     run_dir = os.path.join(args.run_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Derive paths for all artifacts
+    #derive paths for all artifacts
     model_dir = os.path.join(run_dir, "model")
     ui_dir = os.path.join(run_dir, "ui_map")
     bi_dir = os.path.join(run_dir, "bi_map")
@@ -117,7 +117,6 @@ def main(args):
     #BEFORE
     #df = spark.read.parquet(args.in_path).select("user_id","business_id","stars").dropna()
 
-    # AFTER — handle both schemas
     raw = spark.read.parquet(args.in_path)
     cols = set(raw.columns)
 
@@ -152,19 +151,19 @@ def main(args):
 
     dfi = dfi.persist()
 
-    # --- NEW: keep only users with enough history to ensure non-empty truth/preds ---
+    #NEW: keep only users with enough history to ensure non-empty truth/preds
     user_stats = dfi.groupBy("user_idx").agg(F.count("*").alias("n"))
     dfi = dfi.join(user_stats.where(F.col("n") >= 5).select("user_idx"), "user_idx", "inner")
-    # --- end NEW ---
+    #end NEW
 
-    # cap k for tiny data
+    #cap k for tiny data
     num_items = dfi.select("biz_idx").distinct().count()
     k = int(min(args.k or k_cfg, max(1, num_items)))
 
-    # split by users (so test users also appear in train)
+    #split by users (so test users also appear in train)
 
     if args.split_mode == "peruser":
-        # (original behavior; OK for small data, costly for ML-20M)
+        #(original behavior; OK for small data, costly for ML-20M)
         w = Window.partitionBy("user_idx").orderBy(F.rand(args.split_seed))
         dfi_ranked = dfi.withColumn("rn", F.row_number().over(w))
 
@@ -181,7 +180,7 @@ def main(args):
                 train = train.join(sample.select("user_idx", "biz_idx"),
                                    on=["user_idx", "biz_idx"], how="left_anti")
     else:
-        # FAST global random split (recommended for ML-20M)
+        #FAST global random split - for ML-20M
         splits = dfi.randomSplit([args.global_split, 1.0 - args.global_split], seed=args.split_seed)
         train, test = splits[0], splits[1]
 
@@ -189,23 +188,23 @@ def main(args):
         userCol="user_idx",
         itemCol="biz_idx",
         ratingCol="stars",
-        # allow negative factors → often lifts recall on explicit ratings
+        #allow negative factors
         nonnegative=False,
         coldStartStrategy=conf["params"]["als"]["coldStartStrategy"],
-        rank=32,  # ↑ capacity
-        regParam=0.02,  # ↓ lighter regularization
-        maxIter=15,  # a few more iters
+        rank=32,  #capacity
+        regParam=0.02,  #lighter regularization
+        maxIter=15,  #a few more iters
         numUserBlocks=20,
         numItemBlocks=20,
         checkpointInterval=2,
         seed=1,
     )
 
-    # mapping tables (need these for sweep as well)
+    #mapping tables (need these for sweep as well)
     ui = dfi.select("user_id", "user_idx").distinct()
     bi = dfi.select("business_id", "biz_idx").distinct()
 
-    # truth mapped back to string IDs (thresholded)
+    #truth mapped back to string IDs (thresholded)
     truth = (
         test.filter(F.col("stars") >= pos_thresh)
         .select("user_idx", "biz_idx")
@@ -214,7 +213,7 @@ def main(args):
         .select("user_id", "business_id")
     )
 
-    # items each user already interacted with in TRAIN (string IDs)
+    #items each user already interacted with in TRAIN (string IDs)
     seen = (
         train.select("user_idx", "biz_idx")
         .join(ui, "user_idx")
@@ -232,7 +231,7 @@ def main(args):
 
         lb_rows, best, best_model = [], None, None
 
-        # precompute once
+        #precompute once
         truth_set = truth.groupBy("user_id").agg(F.collect_set("business_id").alias("truth_set"))
 
         for rnk, reg, it in itertools.product(ranks, regs, iters):
@@ -247,7 +246,7 @@ def main(args):
                 seed=1
             ).fit(train)
 
-            # recs -> explode -> map to business_id and user_id
+            # recs to explode to map to business_id and user_id
             tmp_recs = tmp_model.recommendForAllUsers(k)
             tmp_exploded = (
                 tmp_recs
@@ -262,7 +261,7 @@ def main(args):
                 .select("user_id", "business_id", "pred")
             )
 
-            # drop seen, build top-k lists
+            #drop seen, build top-k lists
             tmp_recs_topk = (
                 tmp_candidates.join(seen, ["user_id", "business_id"], "left_anti")
                 .groupBy("user_id")
@@ -276,7 +275,7 @@ def main(args):
                 .select("user_id", F.expr(f"transform(slice(arr, 1, {k}), x -> x.business_id)").alias("pred_topk"))
             )
 
-            # precision / recall
+            #precision / recall
             tmp_per_user = (
                 tmp_recs_topk.join(truth_set, "user_id", "inner")
                 .select(
@@ -291,7 +290,7 @@ def main(args):
             tmp_p = float(tmp_per_user.agg(F.mean("prec")).first()[0] or 0.0)
             tmp_r = float(tmp_per_user.agg(F.mean("recall")).first()[0] or 0.0)
 
-            # NDCG@K (JVM-only)
+            #NDCG@K (JVM-only)
             ndcg_base = tmp_recs_topk.join(truth_set, "user_id", "inner")
             dcg_df = ndcg_base.select(
                 "user_id",
@@ -331,7 +330,7 @@ def main(args):
             if best is None or (ndcg_mean, tmp_p) > (best["ndcg_at_k"], best["precision_at_k"]):
                 best, best_model = row, tmp_model
 
-        # save leaderboard + best model
+        #save leaderboard and best model
         lb_path = leaderboard_path
         with open(lb_path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(lb_rows[0].keys()))
@@ -341,21 +340,21 @@ def main(args):
         best_model.write().overwrite().save(model_dir)
         print(f"[sweep] best by NDCG@K -> rank={best['rank']} reg={best['regParam']} iters={best['maxIter']}")
 
-        # use best model downstream
+        #use best model downstream
         model = best_model
     else:
         if args.eval_only:
-            # --- Windows-only workaround: flip FS for model load ---
+            #flip FS for model load
             jconf = spark._jsc.hadoopConfiguration()
-            prev_fs = jconf.get("fs.file.impl")  # remember current setting
-            # DefaultParamsReader expects LocalFileSystem when reading metadata
+            prev_fs = jconf.get("fs.file.impl")  #remember current setting
+            #DefaultParamsReader expects LocalFileSystem when reading metadata
             jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
             try:
                 model = ALSModel.load(model_dir)
             finally:
-                # switch back to RawLocalFileSystem so parquet IO still works on Windows
+                #switch back to RawLocalFileSystem so parquet IO still works on Windows
                 jconf.set("fs.file.impl", prev_fs or "org.apache.hadoop.fs.RawLocalFileSystem")
-            # --- end workaround ---
+            #end workaround
         else:
             model = als.fit(train)
             model.write().overwrite().save(model_dir)
@@ -369,7 +368,7 @@ def main(args):
     ui.write.mode("overwrite").parquet(ui_dir)
     bi.write.mode("overwrite").parquet(bi_dir)
 
-    # Optional: print top-K for a specific user from disk artifacts
+    #top-K for a specific user from disk artifacts
 
     seen_for_cli = (train.select("user_idx", "biz_idx")
                     .join(ui, "user_idx")
@@ -377,7 +376,7 @@ def main(args):
                     .select("user_id", "business_id")
                     .distinct())
 
-    # persist seen items for serving
+    #persist seen items for serving
     seen_for_cli.write.mode("overwrite").parquet(os.path.join(run_dir, "seen.parquet"))
 
     if args.user_id:
@@ -393,13 +392,13 @@ def main(args):
             outfile=args.outfile,
         )
 
-    # recommendations: [user_idx, recommendations(array<struct<biz_idx, rating>>)]
+    #recommendations: [user_idx, recommendations(array<struct<biz_idx, rating>>)]
     recs = model.recommendForAllUsers(k)
 
-    # truth mapped back to string IDs with ONE consistent threshold
+    #truth mapped back to string IDs with ONE consistent threshold
 
 
-    # convert recs to string IDs with scores
+    #convert recs to string IDs with scores
     recs_ids = recs.join(ui, on="user_idx", how="inner")\
                    .select("user_id", "recommendations")
 
@@ -436,7 +435,7 @@ def main(args):
                 )
             )
 
-    # Flatten per-user recs into (user_id, business_id, pred)
+    #per user recs into (user_id, business_id, pred)
     flat_recs = exploded.join(bi, "biz_idx", "inner") \
         .select("user_id", "business_id", "pred")
 
@@ -444,7 +443,7 @@ def main(args):
     if biz_df is not None:
         enriched = enriched.join(biz_df, on="business_id", how="left")
 
-    # Filters
+    #filters
     if args.min_score is not None:
         enriched = enriched.filter(F.col("pred") >= F.lit(args.min_score))
 
@@ -459,20 +458,20 @@ def main(args):
             arr = F.array([F.lit(k) for k in keys])
             enriched = enriched.filter(F.array_overlap(F.col("categories_arr"), arr))
 
-    # Nice ordering
+    #nice ordering
     enriched = enriched.orderBy(F.desc("pred"))
 
-    # ----- Batch CSV export (optional) -----
+    #Batch CSV export
     batch_out = None if args.disable_batch else (args.batch_out_csv or batch_dir)
 
     if batch_out:
-        # choose columns to export; add/remove as you like
+
         export_cols = ["user_id", "business_id", "pred"]
-        # include metadata columns when available
+        #include metadata columns when available
         if "name" in enriched.columns:  export_cols.append("name")
         if "city" in enriched.columns:  export_cols.append("city")
         if "categories_arr" in enriched.columns:
-            # convert ARRAY<STRING> -> STRING so CSV can handle it
+            #converting ARRAY<STRING> to STRING so CSV can handle it
             enriched = enriched.withColumn("categories_csv", F.concat_ws("|", F.col("categories_arr")))
             export_cols.append("categories_csv")
 
@@ -489,7 +488,7 @@ def main(args):
 
         (enriched
          .select(*final_sel)
-         # .coalesce(1)   # Consider removing on ML-20M to avoid memory pressure
+         #.coalesce(1)   # Consider removing on ML-20M to avoid memory pressure
          .write
          .mode("overwrite")
          .option("header", "true")
@@ -497,14 +496,14 @@ def main(args):
 
         print(f"[batch] wrote CSV folder at {batch_out}")
 
-    # ----- Precision@K & Recall@K -----
+    #Precision@K & Recall@K
 
-    # drop seen items from top-k before computing P@K
+    #drop seen items from top-k before computing P@K
     cand = exploded.join(bi, on="biz_idx", how="inner")  # [user_id, business_id, pred]
     if args.exclude_seen:
         cand = cand.join(seen, on=["user_id", "business_id"], how="left_anti")
 
-    # --- NEW: popularity blend ---
+
     pop = (train
            .groupBy("biz_idx")
            .agg(F.count("*").alias("cnt"))
@@ -513,9 +512,9 @@ def main(args):
                    .join(pop.select("biz_idx", "pop_score"), on="biz_idx", how="left")
                    .fillna({"pop_score": 0.0})
                    .withColumn("final_pred", F.col("pred") + F.lit(args.pop_alpha) * F.col("pop_score")))
-    # Use final_pred for ranking
+    #final_pred for ranking
     rank_col = F.col("final_pred") if args.pop_alpha and args.pop_alpha > 0 else F.col("pred")
-    # --- end NEW ---
+
 
     source = cand_scored if (args.pop_alpha and args.pop_alpha > 0) else cand
     recs_topk = (
@@ -539,7 +538,7 @@ def main(args):
         recs_topk = recs_topk.join(sampled_users, "user_id", "inner")
         truth_set = truth_set.join(sampled_users, "user_id", "inner")
 
-    # keep truth_set (or at least its size) in the frame
+    #keep truth_set (or at least its size) in the frame
     per_user = (
         recs_topk.join(truth_set, on="user_id", how="inner")
         .filter(F.size("truth_set") > 0)
@@ -555,7 +554,7 @@ def main(args):
         .cache()
     )
 
-    # ---- DEBUG: inspect a few users' recs vs truth
+    #for  DEBUG : inspect a few users' recs vs truth
     sample_dbg = (
         recs_topk
         .join(truth_set, "user_id", "inner")
@@ -590,7 +589,7 @@ def main(args):
         r_at_k = 0.0 if metrics is None or metrics["r"] is None else float(metrics["r"])
         denom_precision = per_user.select(F.sum(F.when(F.col("pred_size") > 0, F.lit(1)).otherwise(F.lit(0)))).first()[
                               0] or 0
-        denom_ndcg = denom_precision  # same eligibility criterion here
+        denom_ndcg = denom_precision  #same eligibility criterion here
 
         def fmt(x):
             return f"{x:.6f}"
@@ -599,15 +598,12 @@ def main(args):
         print(f"Precision@{k}: {fmt(p_at_k)}")
         print(f"Recall@{k}:    {fmt(r_at_k)}")
 
-    # ----- NDCG@K (JVM-only, no Python UDF) -----
-    # We already have:
-    #  - recs_topk: user_id, pred_topk (array<string>)
-    #  - truth_set: user_id, truth_set (array<string>)
+
 
     ndcg_base = recs_topk.join(truth_set, on="user_id", how="inner")
 
-    # DCG: sum over positions i (0-based):
-    #   gain_i = 1/log2(i+2) if pred_topk[i] ∈ truth_set else 0
+    #sum over positions i (0-based):
+    # gain_i = 1/log2(i+2) if pred_topk[i] ∈ truth_set else 0
     dcg_df = ndcg_base.select(
         "user_id",
         F.aggregate(
@@ -624,7 +620,7 @@ def main(args):
         F.least(F.size(F.col("truth_set")), F.lit(k)).alias("ideal_hits")
     )
 
-    # IDCG: best possible DCG with 'ideal_hits' relevant items at the top
+    #best possible DCG with 'ideal_hits' relevant items at the top
     idcg_df = dcg_df.select(
         "user_id", "dcg", "ideal_hits",
         F.when(
@@ -648,9 +644,8 @@ def main(args):
     else:
         ndcg = float(ndcg_df.agg(F.mean("ndcg").alias("ndcg")).first()["ndcg"] or 0.0)
         print(f"NDCG@{k}: {ndcg:.6f}")
-    # --------------------------------------------
 
-    # ---- Persist run metrics ----
+    #run metrics
     metrics_path = args.metrics_out or metrics_p
     os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
     als_cfg = conf["params"]["als"]
@@ -721,7 +716,7 @@ def main(args):
         json.dump(manifest, f, indent=2)
     print(f"[manifest] wrote {os.path.join(run_dir, 'manifest.json')}")
 
-    # ----- DEBUG (use SAME threshold) -----
+    #DEBUGGING
     print("counts:",
           "users =", df.select("user_id").distinct().count(),
           "items =", df.select("business_id").distinct().count(),
@@ -736,13 +731,12 @@ def main(args):
     print("users with recs =", recs_mapped.count())
     print("sample recs:", recs_mapped.limit(1).toPandas().to_dict(orient="records"))
     print("sample truth:", truth.limit(5).toPandas().to_dict(orient="records"))
-    # -------------------------------------
 
-    # save something tangible
+    #saving something tangible
     if not args.skip_recs_json:
         recs_mapped.write.mode("overwrite").json(recs_dir)
 
-    # ---- CLEANUP (order matters!) ----
+    #CLEANUP
     if dfi.is_cached:
         dfi.unpersist(blocking=False)
     spark.stop()
@@ -772,7 +766,6 @@ if __name__ == "__main__":
                    help="Parent directory for run artifacts (default: data/runs)")
     p.add_argument("--run-name",
                    help="Optional run name; if omitted, a timestamp will be used")
-    # === ADD under other add_argument(...) lines ===
     p.add_argument("--per-user-topk", type=int,
                    help="When exporting batch CSV, keep only top-K items per user")
     p.add_argument("--split-seed", type=int, default=42,

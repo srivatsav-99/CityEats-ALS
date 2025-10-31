@@ -1,4 +1,4 @@
-# jobs/score_als_local.py
+#jobs/score_als_local.py
 import argparse
 from pyspark.sql import functions as F
 from src.common.spark_utils import get_spark
@@ -10,11 +10,10 @@ def main(a):
     bi = spark.read.parquet(a.out + "_bi_map")
     model = ALSModel.load(a.out + "_als_model")
 
-    # recommendForAllUsers
     k = a.k
-    recs = model.recommendForAllUsers(k)  # user_idx, recommendations(array<struct<biz_idx,rating>>)
+    recs = model.recommendForAllUsers(k)  #user_idx, recommendations(array<struct<biz_idx,rating>>)
 
-    # explode & map back to ids
+    #explode & map back to ids
     recs = (recs.select("user_idx", F.posexplode("recommendations").alias("rank0", "r"))
                 .select("user_idx",
                         (F.col("rank0")+1).alias("rank"),
@@ -24,12 +23,12 @@ def main(a):
                 .join(bi, "biz_idx", "inner")
                 .select("user_id", "business_id", "score", "rank"))
 
-    # optionally exclude seen
+    #optionally excluding seen
     if a.exclude_seen:
         df = spark.read.parquet(a.in_path).select("user_id","business_id")
         recs = recs.join(df, ["user_id","business_id"], how="left_anti")
 
-    # save
+    #save
     (recs.orderBy("user_id","rank")
          .write.mode("overwrite")
          .option("header", "true")

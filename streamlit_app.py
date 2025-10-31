@@ -5,7 +5,7 @@ import altair as alt
 
 st.set_page_config(page_title="CityEats-ALS — Demo", layout="wide")
 
-# --- Paths ---
+#Paths
 LOCAL_RECS = "recs_top10_sample_csv/sample.csv"
 MAP_USER = "map_user/map_user.csv"
 MAP_ITEM = "map_item/map_item.csv"
@@ -15,7 +15,7 @@ ARTIFACTS = f"{BUCKET}/artifacts"
 st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
 st.caption("Small CSV demo while the full Spark pipeline runs in cloud. Built by Srivatsav Shrikanth.")
 
-# --- Sidebar: Cloud hooks ---
+#Sidebar : Cloud hooks
 st.sidebar.header("Cloud Storage")
 
 if st.sidebar.button("List cloud artifacts"):
@@ -32,7 +32,7 @@ if st.sidebar.button("List cloud artifacts"):
         st.sidebar.error((e.output or str(e)).strip())
 
 
-# --- Data loaders ---
+#Data loaders
 @st.cache_data
 def load_demo():
     recs = pd.read_csv(LOCAL_RECS)
@@ -62,7 +62,7 @@ with colL:
 with colR:
     st.subheader("Top-K Recommendations")
 
-    # Top-K for the selected user
+    #Top-K for the selected user
     df = (
         recs.loc[recs["user_id"].eq(user)]
             .sort_values("score", ascending=False)
@@ -70,16 +70,14 @@ with colR:
             .copy()
     )
 
-    # Try to find a human-readable item name column if we have one after merges
-    # (common fallbacks you might use in other datasets are included)
     readable_item_col = next(
         (c for c in ["item_name", "name", "business_name", "title", "item"]
          if c in df.columns),
-        "item_id"  # fallback to internal id if no readable name exists
+        "item_id"  #fallback to internal id if no readable name exists
     )
 
     if show_idx:
-        # INTERNAL view: explicitly show ids
+        #explicitly showing ids
         table = (
             df[["user_id", "item_id", "score"]]
             .rename(columns={
@@ -87,10 +85,10 @@ with colR:
                 "item_id": "item_id (internal)"
             })
         )
-        y_field = "item_id"      # chart labels
+        y_field = "item_id"      #chart labels
         y_title = "Item ID (internal)"
     else:
-        # PRETTY view: show a readable item label if we have it
+        #showing a readable item label if available
         table = (
             df[[readable_item_col, "score"]]
             .rename(columns={readable_item_col: "recommended_item"})
@@ -98,10 +96,10 @@ with colR:
         y_field = readable_item_col
         y_title = "Recommended item"
 
-    # Table
+    #Table
     st.dataframe(table, use_container_width=True, hide_index=True)
 
-    # Chart
+    #Chart
     chart = (
         alt.Chart(df)
         .mark_bar()
@@ -113,7 +111,7 @@ with colR:
     )
     st.altair_chart(chart, use_container_width=True)
 
-    # Download (respect the same columns we show in the table)
+    #download
     csv_bytes = table.to_csv(index=False).encode("utf-8")
     st.download_button(
         "Download this Top-K CSV",
@@ -134,7 +132,7 @@ if show_idx:
 
 
 
-# --- Metrics panel (schema-aware) ---
+#Metrics panel
 st.subheader("Model metrics")
 
 import json, os, subprocess
@@ -157,14 +155,14 @@ else:
     cols = st.columns(3)
     shown = False
 
-    # Ratings-style metric
+    #Ratings style metric
     if isinstance(m, dict) and m.get("rmse") is not None:
         cols[0].metric("RMSE (ratings)", f"{float(m['rmse']):.3f}")
         st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
 
         shown = True
 
-    # Ranking-style metrics (when produced by your evaluator)
+    #ranking-style metrics
     if isinstance(m, dict) and m.get("p_at_10") is not None:
         cols[1].metric("Precision@10", f"{float(m['p_at_10']):.3f}")
         shown = True
@@ -192,13 +190,13 @@ if st.button("Pull newest metrics.json from GCS"):
     best_metrics = f"gs://cityeats-{user}/artifacts/runs/best/metrics/metrics.json"
 
     try:
-        # 1) Try frozen best metrics first
+        #trying frozen best metrics first
         _ = subprocess.check_output(["gcloud","storage","ls", best_metrics], text=True)
         subprocess.check_call(["gcloud","storage","cp", best_metrics, "artifacts_demo/metrics.json"])
         st.success("Pulled frozen BEST metrics.json from GCS.")
         st.caption(best_metrics)
     except subprocess.CalledProcessError:
-        # 2) Fallback: look for a Spark part-*.json produced by a run
+        #fallback - looking for a Spark part-*.json produced by a run
         try:
             ls_out = subprocess.check_output(
                 ["bash","-lc",
@@ -215,7 +213,7 @@ if st.button("Pull newest metrics.json from GCS"):
         except subprocess.CalledProcessError as e:
             st.error(f"Failed to pull metrics from GCS: {e}")
 
-# Show metrics
+#show metrics
 try:
     import json, pathlib
     mj = json.loads(pathlib.Path("artifacts_demo/metrics.json").read_text())

@@ -1,10 +1,10 @@
-# jobs/ingest_movielens_local.py
+#jobs/ingest_movielens_local.py
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 
 spark = SparkSession.builder.getOrCreate()
 
-src = r".\data\movielens\ml-20m\ratings.csv"       # CSV with headers: userId,movieId,rating,timestamp
+src = r".\data\movielens\ml-20m\ratings.csv"       #csv with headers: userId,movieId,rating,timestamp
 dst = r".\data\bronze_reviews.parquet"
 
 df = (spark.read.option("header", True).csv(src)

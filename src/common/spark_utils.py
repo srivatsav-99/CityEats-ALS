@@ -2,10 +2,10 @@ from pyspark.sql import SparkSession
 import os
 
 def get_spark(app_name: str = "CityEats-CA"):
-    # Normalize and validate Hadoop home
-    HADOOP_DIR = os.path.abspath(r"C:\hadoop")  # ensure absolute + canonical
+    #normalizing and validating hadoop home
+    HADOOP_DIR = os.path.abspath(r"C:\hadoop")  #ensure absolute + canonical
     if not os.path.isdir(HADOOP_DIR):
-        # Soft warning; Spark will still run with RawLocalFS but warns about winutils
+        #Soft warning; Spark will still run with RawLocalFS but warns about winutils
         print(f"[warn] HADOOP_HOME not found at {HADOOP_DIR}. "
               f"Create it and (optionally) put winutils.exe under {HADOOP_DIR}\\bin to silence warnings.")
 
@@ -19,10 +19,10 @@ def get_spark(app_name: str = "CityEats-CA"):
     spark = (
         SparkSession.builder
         .appName(app_name)
-        # Tell JVM explicitly
+        #telling JVM explicitly
         .config("spark.driver.extraJavaOptions", f"-Dhadoop.home.dir={HADOOP_DIR}")
         .config("spark.executor.extraJavaOptions", f"-Dhadoop.home.dir={HADOOP_DIR}")
-        # Local/dev settings
+        #Local/dev settings
         .config("spark.driver.memory", "4g")
         .config("spark.executor.memory", "4g")
         .config("spark.sql.shuffle.partitions", "8")
@@ -33,7 +33,7 @@ def get_spark(app_name: str = "CityEats-CA"):
         .getOrCreate()
     )
 
-    # Avoid NativeIO on Windows (keep ALSModel.load() FS flip in train_als_local.py)
+    #keep ALSModel.load() FS flip in train_als_local.py
     jconf = spark._jsc.hadoopConfiguration()
     jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
     jconf.set("fs.file.impl.disable.cache", "true")
