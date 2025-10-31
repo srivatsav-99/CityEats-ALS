@@ -185,60 +185,57 @@ import re
 #Sync latest cloud metrics
 st.subheader("Sync latest cloud metrics")
 
-def _gcloud_env():
-    #Force project inside subprocesses; inherit current env otherwise
-    env = os.environ.copy()
-    env["CLOUDSDK_CORE_PROJECT"] = "sri99-cs777" 
-    
-    env["CLOUDSDK_CORE_DISABLE_PROMPTS"] = "1"
-    env["TERM"] = "dumb"
-    return env
+PROJECT_ID = "sri99-cs777"
+USER_ID = os.getenv("USER", "sri99")
+BEST_METRICS = f"gs://cityeats-{USER_ID}/artifacts/runs/best/metrics/metrics.json"
+
+def _run_gcloud(args):
+    """Run gcloud with --project and --quiet; return (ok, stdout)."""
+    full = ["gcloud", "--quiet", "--project", PROJECT_ID] + args
+    # capture_output keeps banner/noise out of the Streamlit UI
+    p = subprocess.run(full, capture_output=True, text=True)
+    return (p.returncode == 0, p.stdout.strip())
+
+def _ensure_demo_dir():
+    os.makedirs("artifacts_demo", exist_ok=True)
+
+def _latest_part_metrics():
+    """Return latest part-*.json metrics path (or '') by listing and filtering in Python."""
+    ok, out = _run_gcloud(["storage", "ls", "--recursive",
+                           f"gs://cityeats-{USER_ID}/artifacts/"])
+    if not ok or not out:
+        return ""
+    candidates = []
+    for line in out.splitlines():
+        s = line.strip()
+        if s.endswith(".json") and "/metrics/" in s and "part-" in s:
+            candidates.append(s)
+    # gcloud already returns sorted-ish; we pick the last lexicographically
+    return sorted(candidates)[-1] if candidates else ""
 
 if st.button("Pull newest metrics.json from GCS"):
-    user = os.getenv("USER", "sri99")
-    best_metrics = f"gs://cityeats-{user}/artifacts/runs/best/metrics/metrics.json"
+    _ensure_demo_dir()
 
-    try:
-        #try frozen best first
-        subprocess.check_call(
-            ["gcloud", "storage", "cp", best_metrics, "artifacts_demo/metrics.json"],
-            env=_gcloud_env(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    # 1) Try frozen best metrics first
+    ok, _ = _run_gcloud(["storage", "cp", BEST_METRICS, "artifacts_demo/metrics.json"])
+    if ok:
         st.success("Pulled frozen BEST metrics.json from GCS.")
-        st.caption(best_metrics)
+        st.caption(BEST_METRICS)
         render_metrics_from_local()
-    except subprocess.CalledProcessError:
-        #fall back to the latest Spark part-*.json
-        try:
-            ls_cmd = (
-                f"gcloud storage ls -r gs://cityeats-{user}/artifacts/**/metrics/ "
-                r"| grep -E 'part-.*\.json$' | sort | tail -n1"
-            )
-            ls_out = subprocess.check_output(
-                ["bash", "-lc", ls_cmd],
-                env=_gcloud_env(),
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-
-            if not ls_out:
-                st.warning("No metrics part file found in GCS (yet).")
-            else:
-                subprocess.check_call(
-                    ["gcloud", "storage", "cp", ls_out, "artifacts_demo/metrics.json"],
-                    env=_gcloud_env(),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+    else:
+        # 2) Fall back to the most recent Spark part-*.json
+        part = _latest_part_metrics()
+        if not part:
+            st.warning("No metrics part file found in GCS (yet).")
+        else:
+            ok2, _ = _run_gcloud(["storage", "cp", part, "artifacts_demo/metrics.json"])
+            if ok2:
                 st.success("Pulled latest Spark metrics part file from GCS.")
-                st.caption(ls_out)
+                st.caption(part)
                 render_metrics_from_local()
+            else:
+                st.error("Failed to pull metrics from GCS. Make sure you’re authenticated and the bucket exists.")
 
-        except subprocess.CalledProcessError as e:
-            st.error("Failed to pull metrics from GCS. Make sure you’re authenticated and the bucket exists.")
-            st.caption(str(e))
 
 
 
