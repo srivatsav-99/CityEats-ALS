@@ -17,7 +17,9 @@ BUNDLE_URL = (
     "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
 )
 #Path to real user map inside the frozen best bundle
-BUNDLE_USER_MAP = "artifacts_demo/CityEats-ALS_best_bundle/map_user"
+BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
+BUNDLE_DIR = "artifacts_demo/CityEats-ALS_best_bundle"  #will exist after unzip
+BUNDLE_USER_MAP = os.path.join(BUNDLE_DIR, "map_user")  #parquet folder
 
 
 
@@ -51,33 +53,45 @@ def load_demo():
     recs = recs.merge(u, on="user_id", how="left").merge(i, on="item_id", how="left")
     return recs, u, i
 
+import zipfile
+
+def ensure_bundle_extracted():
+
+    if not os.path.isdir(BUNDLE_DIR):
+        os.makedirs("artifacts_demo", exist_ok=True)
+        with zipfile.ZipFile(BUNDLE_ZIP, "r") as zf:
+            zf.extractall("artifacts_demo")
+
+
+ensure_bundle_extracted()
+
+
 import glob
 
 @st.cache_data
 def get_available_users(n=12):
     """
     a small dropdown pool of real user_ids from the frozen bundle.
-    Falls back to demo CSV users if the parquet map isnt available.
+    Falls back to demo CSV users if the parquet map isn't available.
     """
     try:
-        #Prefer reading a single part file
-        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
-        target = parts[0] if parts else BUNDLE_USER_MAP  # folder read if no parts pattern
 
-        #Read only the user_id column (requires pyarrow installed)
+        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
+        target = parts[0] if parts else BUNDLE_USER_MAP  # folder read if needed
+
+        #user_id column (pyarrow required)
         dfp = pd.read_parquet(target, columns=["user_id"], engine="pyarrow")
         pool = pd.Series(dfp["user_id"]).dropna().unique().tolist()
-
         if pool:
             k = min(n, len(pool))
-
+            #list is stable
             return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
-    except Exception as e:
-
+    except Exception:
         pass
 
-    # Fallback
+    #fallback
     return sorted(users["user_id"].dropna().unique().tolist())
+
 
 
 try:
