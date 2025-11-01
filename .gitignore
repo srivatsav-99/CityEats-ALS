@@ -27,3 +27,7 @@ Thumbs.db
 !recs_top10_sample_csv/sample.csv
 !map_user/map_user.csv
 !map_item/map_item.csv
+# local-only directories
+artifacts/
+.venv/
+Archive/
