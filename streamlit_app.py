@@ -51,22 +51,32 @@ def load_demo():
     recs = recs.merge(u, on="user_id", how="left").merge(i, on="item_id", how="left")
     return recs, u, i
 
+import glob
+
+@st.cache_data
 def get_available_users(n=12):
     """
-    Try to read real user_ids from the frozen bundle's parquet map.
-    If that fails - fall back to the demo CSV users.
+    a small dropdown pool of real user_ids from the frozen bundle.
+    Falls back to demo CSV users if the parquet map isnt available.
     """
     try:
-        dfp = pd.read_parquet(BUNDLE_USER_MAP)  # expects column : user_id
-        pool = dfp["user_id"].dropna().unique().tolist()
+        #Prefer reading a single part file
+        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
+        target = parts[0] if parts else BUNDLE_USER_MAP  # folder read if no parts pattern
+
+        #Read only the user_id column (requires pyarrow installed)
+        dfp = pd.read_parquet(target, columns=["user_id"], engine="pyarrow")
+        pool = pd.Series(dfp["user_id"]).dropna().unique().tolist()
+
         if pool:
-   
             k = min(n, len(pool))
+
             return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
-    except Exception:
+    except Exception as e:
+
         pass
 
-    #Fallback
+    # Fallback
     return sorted(users["user_id"].dropna().unique().tolist())
 
 
