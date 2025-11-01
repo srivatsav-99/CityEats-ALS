@@ -70,10 +70,20 @@ import zipfile
 
 def ensure_bundle_extracted():
 
-    if not os.path.isdir(BUNDLE_DIR):
+    if os.path.isdir(os.path.join(BUNDLE_ROOT_A, "map_user")) or \
+       os.path.isdir(os.path.join(BUNDLE_ROOT_B, "map_user")):
+        return
+
+    try:
         os.makedirs("artifacts_demo", exist_ok=True)
-        with zipfile.ZipFile(BUNDLE_ZIP, "r") as zf:
-            zf.extractall("artifacts_demo")
+        if os.path.exists(BUNDLE_ZIP):
+            with zipfile.ZipFile(BUNDLE_ZIP, "r") as zf:
+                zf.extractall("artifacts_demo")
+        else:
+            st.warning(f"Bundle zip not found at: {BUNDLE_ZIP}")
+    except Exception as e:
+        st.warning(f"Could not unzip bundle: {e}")
+
 
 
 ensure_bundle_extracted()
