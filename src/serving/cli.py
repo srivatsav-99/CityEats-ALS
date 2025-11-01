@@ -27,6 +27,13 @@ def main():
         .getOrCreate()
     )
 
+    jconf = spark._jsc.hadoopConfiguration()
+    jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
+    jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+    jconf.set("fs.file.impl.disable.cache", "true")
+    jconf.set("io.native.lib.available", "false")
+
+
   
     jconf = spark._jsc.hadoopConfiguration()
     jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
