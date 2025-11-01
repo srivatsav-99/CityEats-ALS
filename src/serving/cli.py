@@ -1,11 +1,11 @@
-import argparse, json, os
+import argparse, json, os, pathlib
 from pyspark.sql import functions as F
 from pyspark.sql import SparkSession
 from pyspark.ml.recommendation import ALSModel
 
-def _abspath(p: str) -> str:
-    #Spark on Windows is happiest with absolute local paths
-    return os.path.abspath(p)
+def _abs_norm(p: str) -> str:
+    p = pathlib.Path(p).resolve()
+    return "file:///" + str(p).replace("\\", "/").lstrip("/")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -18,26 +18,31 @@ def main():
     ap.add_argument("--no-exclude-seen", action="store_true")
     args = ap.parse_args()
 
-    #windows safe Spark session
     spark = (
         SparkSession.builder
         .appName("CityEats-CLI")
-        .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
+        #Hadoop conf flip below is the key
         .config("spark.hadoop.io.native.lib.available", "false")
         .config("spark.sql.warehouse.dir", "/tmp")
         .getOrCreate()
     )
 
-    try:
-        ui_path = _abspath(args.ui_map)
-        bi_path = _abspath(args.bi_map)
-        model_path = _abspath(args.model_dir)
+  
+    jconf = spark._jsc.hadoopConfiguration()
+    jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
+    jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+    # ---------------------------------------------------------------
 
-        ui = spark.read.parquet(ui_path)  #expects : user_id, user_idx
-        bi = spark.read.parquet(bi_path)  #expects : business_id, biz_idx
+    try:
+        ui_path    = _abs_norm(args.ui_map)
+        bi_path    = _abs_norm(args.bi_map)
+        model_path = _abs_norm(args.model_dir)
+        seen_path  = _abs_norm(args.seen) if args.seen else None
+
+        ui = spark.read.parquet(ui_path)   # expects : user_id, user_idx
+        bi = spark.read.parquet(bi_path)   # expects : business_id, biz_idx
         model = ALSModel.load(model_path)
 
-        # get this user's internal index
         u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")
         if u.limit(1).count() == 0:
             print(json.dumps({"msg": f"unknown user_id {args.user_id}"}))
@@ -46,26 +51,21 @@ def main():
         recs = (
             model.recommendForUserSubset(u, args.k)
             .selectExpr("explode(recommendations) as r")
-            .select(
-                F.col("r.biz_idx").alias("biz_idx"),
-                F.col("r.rating").alias("score")
-            )
+            .select(F.col("r.biz_idx").alias("biz_idx"),
+                    F.col("r.rating").alias("score"))
             .join(bi, "biz_idx", "inner")
             .select("business_id", "score")
         )
 
-        if args.seen and not args.no_exclude_seen:
-            seen = spark.read.parquet(_abspath(args.seen))
+        if seen_path and not args.no_exclude_seen:
+            seen = spark.read.parquet(seen_path)
             recs = recs.join(
-                seen.filter(F.col("user_id") == args.user_id).select("business_id"),
-                "business_id",
-                "left_anti",
+                seen.filter(F.col("user_id")==args.user_id).select("business_id"),
+                "business_id", "left_anti"
             )
 
-        out = [
-            {"business_id": r["business_id"], "score": float(r["score"])}
-            for r in recs.orderBy(F.desc("score")).collect()
-        ]
+        out = [{"business_id": r["business_id"], "score": float(r["score"])}
+               for r in recs.orderBy(F.desc("score")).collect()]
         print(json.dumps({"user_id": args.user_id, "k": args.k, "items": out}, indent=2))
 
     finally:
