@@ -16,6 +16,9 @@ BUNDLE_URL = (
     "https://media.githubusercontent.com/media/"
     "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
 )
+#Path to real user map inside the frozen best bundle
+BUNDLE_USER_MAP = "artifacts_demo/CityEats-ALS_best_bundle/map_user"
+
 
 
 st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
@@ -48,6 +51,25 @@ def load_demo():
     recs = recs.merge(u, on="user_id", how="left").merge(i, on="item_id", how="left")
     return recs, u, i
 
+def get_available_users(n=12):
+    """
+    Try to read real user_ids from the frozen bundle's parquet map.
+    If that fails - fall back to the demo CSV users.
+    """
+    try:
+        dfp = pd.read_parquet(BUNDLE_USER_MAP)  # expects column : user_id
+        pool = dfp["user_id"].dropna().unique().tolist()
+        if pool:
+   
+            k = min(n, len(pool))
+            return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+    except Exception:
+        pass
+
+    #Fallback
+    return sorted(users["user_id"].dropna().unique().tolist())
+
+
 try:
     recs, users, items = load_demo()
 except FileNotFoundError as e:
@@ -58,7 +80,10 @@ colL, colR = st.columns([1,2], gap="large")
 
 with colL:
     st.subheader("Pick a user")
-    user = st.selectbox("User ID", users["user_id"].unique(), index=0)
+    available_users = get_available_users(n=15)
+    st.caption("Select any user ID to refresh recommendations (loaded from the frozen bundle when available).")
+    user = st.selectbox("User ID", options=available_users, index=0)
+
     k = st.slider("Top-K", min_value=3, max_value=10, value=10, step=1)
     show_idx = st.toggle("Show internal indices", value=False)
 
