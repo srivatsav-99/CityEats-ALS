@@ -11,6 +11,12 @@ MAP_USER = "map_user/map_user.csv"
 MAP_ITEM = "map_item/map_item.csv"
 BUCKET = f"gs://cityeats-{os.getenv('USER','sri99')}"
 ARTIFACTS = f"{BUCKET}/artifacts"
+#Public GitHub LFS URL for the frozen serving bundle
+BUNDLE_URL = (
+    "https://media.githubusercontent.com/media/"
+    "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
+)
+
 
 st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
 st.caption("Small CSV demo while the full Spark pipeline runs in cloud. Built by Srivatsav Shrikanth.")
@@ -177,6 +183,33 @@ def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
 
 render_metrics_from_local()
 
+#offline bundle section
+st.divider()
+st.subheader("Offline serving bundle")
+
+st.caption(
+    "Download the frozen model + maps to run recommendations locally without GCS. "
+    "This is the exact snapshot we froze from the best cloud run."
+)
+
+st.link_button("⬇️ Download CityEats-ALS_best_bundle.zip", BUNDLE_URL)
+
+with st.expander("How to use the bundle (local quickstart)"):
+    st.markdown(
+        """
+        1. Unzip the file. You will get `model/`, `map_user/`, and `map_item/`.
+        2. Run the CLI pointing to those folders (example):
+
+           ```bash
+           python -m src.serving.cli \
+             --model-dir /path/to/CityEats-ALS_best_bundle/model \
+             --ui-map    /path/to/CityEats-ALS_best_bundle/map_user \
+             --bi-map    /path/to/CityEats-ALS_best_bundle/map_item \
+             --user-id 41397 --k 10
+           ```
+        3. You should see Top-K items with scores printed for the given user id.
+        """
+    )
 
 
 
