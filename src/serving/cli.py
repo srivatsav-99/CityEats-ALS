@@ -31,7 +31,6 @@ def main():
     jconf = spark._jsc.hadoopConfiguration()
     jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
     jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
-    # ---------------------------------------------------------------
 
     try:
         ui_path    = _abs_norm(args.ui_map)
