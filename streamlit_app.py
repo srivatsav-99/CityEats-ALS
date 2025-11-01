@@ -284,3 +284,23 @@ st.markdown(
 - Use the sidebar button to confirm your cloud artifacts exist.
 """
 )
+
+)
+# Keep the above section as-is
+
+st.divider()
+
+st.markdown("""
+### About this Demo
+
+This demo showcases the **CityEats-ALS** recommender system, a scalable ML pipeline built with **PySpark ALS** and deployed on **Google Cloud Dataproc**.
+
+- **Dataset:** 50M+ explicit Yelp ratings (Tier B scale)
+- **Model:** ALS (rank=64, regParam=0.1, maxIter=12)
+- **Metrics:** RMSE ≈ 0.407 (explicit ratings)
+- **Artifacts:** Stored on `gs://cityeats-sri99/artifacts/runs/best/`
+- **Purpose:** Visualize top-N recommendations, metrics, and artifact structure
+
+This Streamlit version uses compact CSV samples to mirror the behavior of the full cloud pipeline : lightweight and explainable.
+""")
+
