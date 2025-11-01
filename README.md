@@ -237,3 +237,23 @@ _Boston University
 > **Optimization:** Adaptive Query Execution (AQE) was enabled with shuffle parallelism=64 for balanced Spark performance during ALS training.
 
 ---
+
+## Offline serving bundle
+
+A ready-to-serve export of the best ALS run is included via Git LFS:
+
+**Path:** `artifacts_demo/CityEats-ALS_best_bundle.zip` (≈450 MB)
+
+**Contents**
+model/ # Spark ALS model (stages + metadata)
+map_user/map_user.csv # external→internal user id mapping
+map_item/map_item.csv # external→internal item id mapping
+metrics/metrics.json # run metrics (RMSE + params) for reference
+
+
+**Use**
+1. Download & unzip.  
+2. Load `map_user.csv` / `map_item.csv` to translate IDs.  
+3. Load `model/` with the matching Spark version (see repo `requirements.txt`).  
+4. Score or generate top-K and re-map internal ids back to external ids.
+
