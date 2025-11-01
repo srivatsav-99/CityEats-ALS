@@ -15,3 +15,9 @@ env.mk
 recs_top10_sample_csv/
 map_user/
 map_item/
+
+# keep tiny demo inputs in git for Streamlit Cloud
+!artifacts_demo/metrics.json
+!recs_top10_sample_csv/*
+!map_user/*
+!map_item/*
