@@ -285,9 +285,6 @@ st.markdown(
 """
 )
 
-)
-# Keep the above section as-is
-
 st.divider()
 
 st.markdown("""
