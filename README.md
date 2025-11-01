@@ -8,6 +8,26 @@ The journey reflects how raw coursework can mature into a **production-grade ML 
 
 ---
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![Spark](https://img.shields.io/badge/Spark-3.5.6-orange)
+![Python](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12-blue)
+![Dataproc](https://img.shields.io/badge/GCP-Dataproc-informational)
+[![Streamlit Cloud](https://img.shields.io/badge/Live%20Demo-Streamlit-red)](https://streamlit.io)(https://cityeats-als-lfbtrq3bsn3ophi7sm9wkt.streamlit.app)
+[![Model Bundle](https://img.shields.io/badge/Download-Best%20Bundle-grey)](https://media.githubusercontent.com/media/srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip)
+
+---
+
+### Quick Start
+
+**Live Demo (Streamlit Cloud):** (https://cityeats-als-lfbtrq3bsn3ophi7sm9wkt.streamlit.app/)
+
+**Local Demo (CSV-based)**
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+
+---
+
 ## SMART Project Goal
 
 | Element | Description |
