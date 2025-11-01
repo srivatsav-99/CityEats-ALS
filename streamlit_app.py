@@ -16,11 +16,22 @@ BUNDLE_URL = (
     "https://media.githubusercontent.com/media/"
     "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
 )
-#Path to real user map inside the frozen best bundle
+
 BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
-BUNDLE_DIR = "artifacts_demo/CityEats-ALS_best_bundle"  #will exist after unzip
-BUNDLE_USER_MAP = os.path.join(BUNDLE_DIR, "map_user")  #parquet folder
-BUNDLE_USER_CSV = os.path.join(BUNDLE_DIR, "map_user", "map_user.csv")
+BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle" 
+BUNDLE_ROOT_B = "artifacts_demo"                          
+
+def bundle_user_csv_path() -> str:
+    """Return the path to map_user.csv regardless of how the zip extracted"""
+    candidates = [
+        os.path.join(BUNDLE_ROOT_A, "map_user", "map_user.csv"),
+        os.path.join(BUNDLE_ROOT_B, "map_user", "map_user.csv"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return ""
+
 
 
 
@@ -75,8 +86,9 @@ def get_available_users(n=12):
 
     #Bundle CSV
     try:
-        if os.path.exists(BUNDLE_USER_CSV):
-            dfc = pd.read_csv(BUNDLE_USER_CSV, usecols=["user_id"])
+        csv_path = bundle_user_csv_path()
+        if csv_path:
+            dfc = pd.read_csv(csv_path, usecols=["user_id"])
             pool = (
                 pd.Series(dfc["user_id"])
                 .dropna()
@@ -93,7 +105,9 @@ def get_available_users(n=12):
     #Bundle Parquet
     try:
         import glob
-        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
+        parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_A, "map_user", "part-*.parquet")))
+        if not parts:
+            parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_B, "map_user", "part-*.parquet")))
         if parts:
             dfp = pd.read_parquet(parts[0], columns=["user_id"], engine="pyarrow")
             pool = (
@@ -122,6 +136,7 @@ def get_available_users(n=12):
         return sorted(pool)
     except Exception:
         return []
+
 
 
 
