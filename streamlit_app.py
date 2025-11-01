@@ -20,6 +20,8 @@ BUNDLE_URL = (
 BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
 BUNDLE_DIR = "artifacts_demo/CityEats-ALS_best_bundle"  #will exist after unzip
 BUNDLE_USER_MAP = os.path.join(BUNDLE_DIR, "map_user")  #parquet folder
+BUNDLE_USER_CSV = os.path.join(BUNDLE_DIR, "map_user", "map_user.csv")
+
 
 
 
@@ -70,27 +72,57 @@ import glob
 
 @st.cache_data
 def get_available_users(n=12):
-    """
-    a small dropdown pool of real user_ids from the frozen bundle.
-    Falls back to demo CSV users if the parquet map isn't available.
-    """
+
+    #Bundle CSV
     try:
-
-        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
-        target = parts[0] if parts else BUNDLE_USER_MAP  # folder read if needed
-
-        #user_id column (pyarrow required)
-        dfp = pd.read_parquet(target, columns=["user_id"], engine="pyarrow")
-        pool = pd.Series(dfp["user_id"]).dropna().unique().tolist()
-        if pool:
-            k = min(n, len(pool))
-            #list is stable
-            return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+        if os.path.exists(BUNDLE_USER_CSV):
+            dfc = pd.read_csv(BUNDLE_USER_CSV, usecols=["user_id"])
+            pool = (
+                pd.Series(dfc["user_id"])
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+            if pool:
+                k = min(n, len(pool))
+                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
     except Exception:
         pass
 
-    #fallback
-    return sorted(users["user_id"].dropna().unique().tolist())
+    #Bundle Parquet
+    try:
+        import glob
+        parts = sorted(glob.glob(os.path.join(BUNDLE_USER_MAP, "part-*.parquet")))
+        if parts:
+            dfp = pd.read_parquet(parts[0], columns=["user_id"], engine="pyarrow")
+            pool = (
+                pd.Series(dfp["user_id"])
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+            if pool:
+                k = min(n, len(pool))
+                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+    except Exception:
+        pass
+
+    #Fallback to repo CSV
+    try:
+        dfm = pd.read_csv(MAP_USER, usecols=["user_id"])
+        pool = (
+            pd.Series(dfm["user_id"])
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        return sorted(pool)
+    except Exception:
+        return []
+
 
 
 
@@ -119,11 +151,17 @@ with colR:
 
     #Top-K for the selected user
     df = (
-        recs.loc[recs["user_id"].eq(user)]
+        recs.loc[recs["user_id"].astype(str).eq(str(user))]
             .sort_values("score", ascending=False)
             .head(k)
             .copy()
     )
+    if df.empty:
+        st.info(
+            "No demo recommendations for this user in the small sample CSV. "
+            "Pick another user ID from the dropdown."
+        )
+        st.stop()
 
     readable_item_col = next(
         (c for c in ["item_name", "name", "business_name", "title", "item"]
