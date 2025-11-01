@@ -3,7 +3,7 @@
 Hi, I’m **Srivatsav Shrikanth**. **CityEats-ALS** predicts where people are most likely to enjoy eating, starting with cities like **Toronto, Vancouver, and Montreal**.
 
 This system began as a **local Windows Spark prototype** and evolved into a **cloud-scale recommender** on **Google Cloud Dataproc**, trained over **50M+ interactions** from Yelp.  
-It demonstrates how coursework can mature into a **production-grade ML system** — reproducible, explainable, and cost-efficient.
+It demonstrates how coursework can mature into a **production-grade ML system** - reproducible, explainable, and cost-efficient.
 
 ---
 
@@ -56,7 +56,7 @@ streamlit run streamlit_app.py
 
 ## Training & Evaluation
 
-### Phase A — Local Prototype (Sparse Dataset)
+### Phase A - Local Prototype (Sparse Dataset)
 
 - Dataset ≈ 20M interactions (Toronto subset)  
 - Goal: validate pipeline + metric computation  
@@ -64,7 +64,7 @@ streamlit run streamlit_app.py
 
 | Metric @ K = 10 | Value | Context |
 |---|---|---|
-| **Precision** | 0.0021 | ~0.21 % of Top-10 recs relevant — expected for sparse data. |
+| **Precision** | 0.0021 | ~0.21 % of Top-10 recs relevant - expected for sparse data. |
 | **Recall** | 0.0017 | Recovered ~0.17 % of true positives per user. |
 | **NDCG** | 0.0034 | Reasonable ranking structure with popularity correction. |
 
@@ -72,7 +72,7 @@ streamlit run streamlit_app.py
 
 ---
 
-### Phase B — Tier B Dataproc Run (50M+ Interactions)
+### Phase B - Tier B Dataproc Run (50M+ Interactions)
 
 - Dataset: **Yelp Explicit Ratings (Tier B Split 80/20)**  
 - Platform: **GCP Dataproc Single-Node Cluster (n2-standard-16)**  
@@ -122,11 +122,11 @@ python -m src.serving.cli `
 .\scripts\run_local.ps1 -K 10 -Frac 1.0 -PopAlpha 0.05
 ```
 
-Automates training, evaluation, and artifact management — perfect for rapid experimentation.
+Automates training, evaluation, and artifact management - perfect for rapid experimentation.
 
 ---
 
-## Streamlit Demo (Recruiter Preview)
+## Streamlit Demo
 
 | Feature | Description |
 |---|---|
@@ -143,7 +143,7 @@ make demo
 
 ---
 
-## Frozen “Best Run” (Cloud Truth)
+## Frozen “Best Run”
 
 | Asset | Path |
 |---|---|
@@ -186,7 +186,7 @@ make demo
 - Built end-to-end pipelines with reproducible artifacts and version control.  
 - Optimized ALS hyperparameters (`rank`, `regParam`, `iter`) using structured metrics.  
 - Learned to scale from local to cloud using Dataproc and GCS efficiently.  
-- Developed production habits — logging, resumable runs, traceability, cost awareness.  
+- Developed production habits - logging, resumable runs, traceability, cost awareness.  
 
 ---
 
@@ -206,15 +206,15 @@ make demo
 ## Personal Reflection
 
 CityEats-ALS was a long-haul build from debugging Spark on Windows to tuning ALS on Dataproc.  
-It taught me that real ML engineering isn’t about accuracy alone — it’s about **clarity, reproducibility, and trust**.  
+It taught me that real ML engineering isn’t about accuracy alone - it’s about **clarity, reproducibility, and trust**.  
 Every fix, every cloud sync, every RMSE improvement was a step toward industry-grade thinking.  
-CityEats-ALS is more than a recommender — it’s proof that rigor and curiosity scale together.
+CityEats-ALS is more than a recommender, it’s proof that rigor and curiosity scale together.
 
 ---
 
 ## MIT License
 
-**MIT License © 2025 — Srivatsav Shrikanth**  
+**MIT License © 2025 - Srivatsav Shrikanth**  
 _Boston University_
 
 ---
@@ -223,3 +223,4 @@ _Boston University_
 - Add SHAP/LIME explainability for recommendations  
 - Integrate FastAPI for live serving  
 - Deploy on Vertex AI or Azure ML for production inference
+
