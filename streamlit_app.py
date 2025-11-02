@@ -148,6 +148,9 @@ def get_available_users(n=12):
 
 try:
     recs, users, items = load_demo()
+
+    RECS_USER_IDS = set(recs["user_id"].astype(str).unique())
+    
 except FileNotFoundError as e:
     st.error(f"Missing demo file: {e}")
     st.stop()
