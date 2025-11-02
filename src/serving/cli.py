@@ -9,18 +9,18 @@ import pandas as pd
 
 def _normalize_pd_map_columns(pdf: pd.DataFrame) -> pd.DataFrame:
     rename = {}
-    #user map
+    # user map
     if "userIndex" in pdf.columns and "user_idx" not in pdf.columns:
         rename["userIndex"] = "user_idx"
-    #item map
+    # item map
     if "itemIndex" in pdf.columns and "item_idx" not in pdf.columns:
         rename["itemIndex"] = "item_idx"
-    #external id
+    # external id
     if "business_id" in pdf.columns and "item_id" not in pdf.columns:
         rename["business_id"] = "item_id"
     pdf = pdf.rename(columns=rename)
 
-    #index cols to int
+    # index cols to int
     for c in ("user_idx", "item_idx"):
         if c in pdf.columns and pd.api.types.is_float_dtype(pdf[c]):
             pdf[c] = pdf[c].astype("int64")
@@ -36,15 +36,15 @@ def _normalize_spark_map_columns(df):
     return df
 
 def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
-    import re
     is_windows = platform.system().lower().startswith("win")
 
     def _local(p: str) -> str:
-        return p.replace("file:///", "") if p.startswith("file:///") else p
+        # Strip file:/// only if present (should not be on Windows now)
+        return p.replace("file:///", "").replace("file://", "") if p.startswith("file://") else p
 
     local_dir = _local(dir_path)
 
-    #any *.parquet file
+    # any *.parquet file
     parts = sorted(glob.glob(os.path.join(local_dir, "*.parquet")))
     if not parts:
         raise FileNotFoundError(f"No parquet files found under {local_dir}")
@@ -70,7 +70,9 @@ def _abs_norm(p: str) -> str:
     p = pathlib.Path(p).resolve()
     s = str(p)
     if platform.system().lower().startswith("win"):
+        # IMPORTANT: no scheme on Windows, avoid RawLocalFileSystem during model load
         return s
+    # On Unix-like, use file:// + absolute path
     return "file://" + s
 
 def main():
@@ -89,7 +91,7 @@ def main():
         .appName("CityEats-CLI")
         .config("spark.hadoop.io.native.lib.available", "false")
         .config("spark.sql.warehouse.dir", "/tmp")
-        # Start in LocalFileSystem mode so model load doesn't need winutils
+        # Start in LocalFileSystem so ALSModel.load doesn't need winutils
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
         .config("spark.hadoop.fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
         .config("spark.hadoop.fs.file.impl.disable.cache", "true")
@@ -102,14 +104,14 @@ def main():
         model_path = _abs_norm(args.model_dir)
         seen_path  = _abs_norm(args.seen) if args.seen else None
 
-        #Read and normalize maps
+        # Read and normalize maps
         ui = _read_map_as_spark_df(spark, ui_path, ["user_id", "user_idx"])
         bi = _read_map_as_spark_df(spark, bi_path, ["item_id", "item_idx"])
 
         # Load model while LocalFileSystem is active
         model = ALSModel.load(model_path)
 
-        # After load, switch to RawLocalFileSystem for parquet IO
+        # OPTIONAL: after load, switch to RawLocalFileSystem for parquet IO
         jconf = spark._jsc.hadoopConfiguration()
         jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
         jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
