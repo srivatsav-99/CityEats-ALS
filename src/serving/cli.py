@@ -39,7 +39,7 @@ def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
     is_windows = platform.system().lower().startswith("win")
 
     def _local(p: str) -> str:
-        # Strip file:/// only if present (should not be on Windows now)
+        # Strip file://* only if present
         return p.replace("file:///", "").replace("file://", "") if p.startswith("file://") else p
 
     local_dir = _local(dir_path)
@@ -70,9 +70,9 @@ def _abs_norm(p: str) -> str:
     p = pathlib.Path(p).resolve()
     s = str(p)
     if platform.system().lower().startswith("win"):
-        # IMPORTANT: no scheme on Windows, avoid RawLocalFileSystem during model load
+        # Windows: plain absolute path (no scheme)
         return s
-    # On Unix-like, use file:// + absolute path
+    # Unix-like: file:// + absolute path
     return "file://" + s
 
 def main():
@@ -91,7 +91,7 @@ def main():
         .appName("CityEats-CLI")
         .config("spark.hadoop.io.native.lib.available", "false")
         .config("spark.sql.warehouse.dir", "/tmp")
-        # Start in LocalFileSystem so ALSModel.load doesn't need winutils
+        # Start in LocalFileSystem so ALSModel.load doesn't need winutils/native DLLs
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
         .config("spark.hadoop.fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
         .config("spark.hadoop.fs.file.impl.disable.cache", "true")
@@ -108,15 +108,14 @@ def main():
         ui = _read_map_as_spark_df(spark, ui_path, ["user_id", "user_idx"])
         bi = _read_map_as_spark_df(spark, bi_path, ["item_id", "item_idx"])
 
-        # Load model while LocalFileSystem is active
-        model = ALSModel.load(model_path)
-
-        # OPTIONAL: after load, switch to RawLocalFileSystem for parquet IO
+        # Make sure LocalFileSystem is active at model load time
         jconf = spark._jsc.hadoopConfiguration()
-        jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
+        jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
         jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
         jconf.set("fs.file.impl.disable.cache", "true")
-        jconf.set("io.native.lib.available", "false")
+
+        # Load model
+        model = ALSModel.load(model_path)
 
         # locate user
         u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")
