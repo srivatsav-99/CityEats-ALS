@@ -8,21 +8,28 @@ import platform
 import pandas as pd
 
 def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
-
+    import re
     is_windows = platform.system().lower().startswith("win")
-    parts = sorted(glob.glob(os.path.join(dir_path, "part-*.parquet")))
-    if not parts:  #support a single parquet file
-        maybe_single = os.path.join(dir_path, "data.parquet")
-        if os.path.exists(maybe_single):
-            parts = [maybe_single]
+
+
+    def _local(p: str) -> str:
+        return p.replace("file:///", "") if p.startswith("file:///") else p
+
+    local_dir = _local(dir_path)
+
+    #pick up any *.parquet part rather than "part-*.parquet" only
+    parts = sorted(glob.glob(os.path.join(local_dir, "*.parquet")))
+    if not parts:
+        raise FileNotFoundError(f"No parquet files found under {local_dir}")
 
     if is_windows:
         #pandas to spark
         pdfs = [pd.read_parquet(p, engine="pyarrow", columns=cols) for p in parts]
-        pdf = pd.concat(pdfs, ignore_index=True) if len(pdfs) > 1 else pdfs[0]
+        pdf = pd.concat(pdfs, ignore_index=True)
         return spark.createDataFrame(pdf[cols])
     else:
         return spark.read.parquet(*parts).select(*cols)
+
 
 
 
@@ -77,23 +84,28 @@ def main():
             print(json.dumps({"msg": f"unknown user_id {args.user_id}"}))
             return
 
+        # ALS recommendForUserSubset returns a struct with item index and rating.
+        # In our bundle/maps: item index column is "item_idx", external id is "item_id".
         recs = (
             model.recommendForUserSubset(u, args.k)
             .selectExpr("explode(recommendations) as r")
-            .select(F.col("r.biz_idx").alias("biz_idx"),
-                    F.col("r.rating").alias("score"))
-            .join(bi, "biz_idx", "inner")
-            .select("business_id", "score")
+            .select(
+                F.col("r.item_idx").alias("item_idx"),
+                F.col("r.rating").alias("score"),
+            )
+            .join(bi, "item_idx", "inner")
+            .select("item_id", "score")
         )
 
         if seen_path and not args.no_exclude_seen:
             seen = spark.read.parquet(seen_path)
             recs = recs.join(
-                seen.filter(F.col("user_id")==args.user_id).select("business_id"),
-                "business_id", "left_anti"
+                seen.filter(F.col("user_id") == args.user_id).select("item_id"),
+                "item_id",
+                "left_anti",
             )
 
-        out = [{"business_id": r["business_id"], "score": float(r["score"])}
+        out = [{"item_id": r["item_id"], "score": float(r["score"])}
                for r in recs.orderBy(F.desc("score")).collect()]
         print(json.dumps({"user_id": args.user_id, "k": args.k, "items": out}, indent=2))
 
