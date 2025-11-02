@@ -21,7 +21,7 @@ BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
 BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle" 
 BUNDLE_ROOT_B = "artifacts_demo"
 USER_POOL = "artifacts_demo/user_pool.csv"
-DATA_VERSION = "v3" 
+DATA_VERSION = "v4" 
 
 
 def bundle_user_csv_path() -> str:
@@ -165,14 +165,13 @@ with colL:
     # keep only those that actually have recommendations in sample.csv
     options = [str(u) for u in available_users if str(u) in RECS_USER_IDS]
 
+    options = [str(u) for u in available_users if str(u) in RECS_USER_IDS]
     if not options:
-        st.warning("No overlap between user pool and demo recommendations. "
-                   "Add rows for these users to recs_top10_sample_csv/sample.csv "
-                   "or pick different user IDs.")
-        st.stop()
+        #Fallback
+        options = sorted(RECS_USER_IDS)
     
-    # pick a stable default (first option)
     user = st.selectbox("User ID", options=sorted(options), index=0)
+
 
 
     k = st.slider("Top-K", min_value=3, max_value=10, value=10, step=1)
