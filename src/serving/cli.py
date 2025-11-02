@@ -3,6 +3,29 @@ from pyspark.sql import functions as F
 from pyspark.sql import SparkSession
 from pyspark.ml.recommendation import ALSModel
 
+import glob
+import platform
+import pandas as pd
+
+def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
+
+    is_windows = platform.system().lower().startswith("win")
+    parts = sorted(glob.glob(os.path.join(dir_path, "part-*.parquet")))
+    if not parts:  #support a single parquet file
+        maybe_single = os.path.join(dir_path, "data.parquet")
+        if os.path.exists(maybe_single):
+            parts = [maybe_single]
+
+    if is_windows:
+        #pandas to spark
+        pdfs = [pd.read_parquet(p, engine="pyarrow", columns=cols) for p in parts]
+        pdf = pd.concat(pdfs, ignore_index=True) if len(pdfs) > 1 else pdfs[0]
+        return spark.createDataFrame(pdf[cols])
+    else:
+        return spark.read.parquet(*parts).select(*cols)
+
+
+
 def _abs_norm(p: str) -> str:
     p = pathlib.Path(p).resolve()
     return "file:///" + str(p).replace("\\", "/").lstrip("/")
@@ -45,8 +68,8 @@ def main():
         model_path = _abs_norm(args.model_dir)
         seen_path  = _abs_norm(args.seen) if args.seen else None
 
-        ui = spark.read.parquet(ui_path)   # expects : user_id, user_idx
-        bi = spark.read.parquet(bi_path)   # expects : business_id, biz_idx
+        ui = _read_map_as_spark_df(spark, ui_path, ["user_id", "user_idx"])
+        bi = _read_map_as_spark_df(spark, bi_path, ["item_id", "item_idx"])
         model = ALSModel.load(model_path)
 
         u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")
