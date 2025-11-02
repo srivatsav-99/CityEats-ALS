@@ -7,28 +7,68 @@ import glob
 import platform
 import pandas as pd
 
+def _normalize_pd_map_columns(pdf: pd.DataFrame) -> pd.DataFrame:
+    rename = {}
+    #user map
+    if "userIndex" in pdf.columns and "user_idx" not in pdf.columns:
+        rename["userIndex"] = "user_idx"
+    #item map
+    if "itemIndex" in pdf.columns and "item_idx" not in pdf.columns:
+        rename["itemIndex"] = "item_idx"
+    #external id
+    if "business_id" in pdf.columns and "item_id" not in pdf.columns:
+        rename["business_id"] = "item_id"
+    pdf = pdf.rename(columns=rename)
+
+    #index cols to int
+    for c in ("user_idx", "item_idx"):
+        if c in pdf.columns and pd.api.types.is_float_dtype(pdf[c]):
+            pdf[c] = pdf[c].astype("int64")
+    return pdf
+
+def _normalize_spark_map_columns(df):
+
+    for old, new in [("userIndex","user_idx"), ("itemIndex","item_idx"), ("business_id","item_id")]:
+        if old in df.columns and new not in df.columns:
+            df = df.withColumnRenamed(old, new)
+
+    for c in ("user_idx", "item_idx"):
+        if c in df.columns:
+            df = df.withColumn(c, F.col(c).cast("int"))
+    return df
+
 def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
     import re
     is_windows = platform.system().lower().startswith("win")
-
 
     def _local(p: str) -> str:
         return p.replace("file:///", "") if p.startswith("file:///") else p
 
     local_dir = _local(dir_path)
 
-    #pick up any *.parquet part rather than "part-*.parquet" only
+    #any *.parquet file
     parts = sorted(glob.glob(os.path.join(local_dir, "*.parquet")))
     if not parts:
         raise FileNotFoundError(f"No parquet files found under {local_dir}")
 
     if is_windows:
-        #pandas to spark
-        pdfs = [pd.read_parquet(p, engine="pyarrow", columns=cols) for p in parts]
+
+        pdfs = [pd.read_parquet(p, engine="pyarrow") for p in parts]
         pdf = pd.concat(pdfs, ignore_index=True)
+        pdf = _normalize_pd_map_columns(pdf)
+        missing = [c for c in cols if c not in pdf.columns]
+        if missing:
+            raise KeyError(f"Expected columns {cols} not found. Got {list(pdf.columns)}; missing {missing}")
         return spark.createDataFrame(pdf[cols])
     else:
-        return spark.read.parquet(*parts).select(*cols)
+        df = spark.read.parquet(*parts)
+        df = _normalize_spark_map_columns(df)
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            got = ", ".join(df.columns)
+            raise KeyError(f"Expected columns {cols} not found. Got {got}; missing {missing}")
+        return df.select(*cols)
+
 
 
 
