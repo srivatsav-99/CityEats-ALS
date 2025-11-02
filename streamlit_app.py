@@ -1,31 +1,51 @@
-import os, subprocess, io
+# streamlit_app.py
+import os
+import io
+import re
+import glob
+import json
+import zipfile
+import shutil
+import subprocess
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 import altair as alt
 
-st.set_page_config(page_title="CityEats-ALS — Demo", layout="wide")
+# --- Offline recommender (pure Python/NumPy) ---
+# Assumes you have src/serving/offline_recs.py with load_bundle() and recommend()
+from src.serving.offline_recs import load_bundle, recommend
 
-#Paths
-LOCAL_RECS = "recs_top10_sample_csv/sample.csv"
-MAP_USER = "map_user/map_user.csv"
+# ---------------- UI CONFIG ----------------
+st.set_page_config(page_title="CityEats-ALS — Demo", layout="wide")
+st.title("CityEats-ALS — Scalable Food Recommender (Demo)")
+st.caption("Streamlit demo using the frozen offline bundle (no Spark). Built by Srivatsav Shrikanth.")
+
+# ---------------- PATHS / CONSTANTS ----------------
+# Local, human-readable maps (optional; used only to show readable names if present)
 MAP_ITEM = "map_item/map_item.csv"
-BUCKET = f"gs://cityeats-{os.getenv('USER','sri99')}"
+
+# GCS bucket + artifacts (sidebar cloud browsing + metrics sync)
+USER_ID_ENV = os.getenv("USER", "sri99")
+PROJECT_ID = "sri99-cs777"
+BUCKET = f"gs://cityeats-{USER_ID_ENV}"
 ARTIFACTS = f"{BUCKET}/artifacts"
-#Public GitHub LFS URL for the frozen serving bundle
+
+# Public GitHub LFS URL for the frozen serving bundle
 BUNDLE_URL = (
     "https://media.githubusercontent.com/media/"
     "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
 )
 
+# Local bundle locations
 BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
-BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle" 
-BUNDLE_ROOT_B = "artifacts_demo"
-USER_POOL = "artifacts_demo/user_pool.csv"
-DATA_VERSION = "v4" 
+BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle"   # typical unzip root
+BUNDLE_ROOT_B = "artifacts_demo"                             # fallback root (zip extracted flat)
 
-
+# ---------------- HELPERS ----------------
 def bundle_user_csv_path() -> str:
-    """Return the path to map_user.csv regardless of how the zip extracted"""
+    """Return the path to map_user.csv regardless of how the zip extracted."""
     candidates = [
         os.path.join(BUNDLE_ROOT_A, "map_user", "map_user.csv"),
         os.path.join(BUNDLE_ROOT_B, "map_user", "map_user.csv"),
@@ -35,245 +55,78 @@ def bundle_user_csv_path() -> str:
             return p
     return ""
 
-
-
-
-
-st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
-st.caption("Small CSV demo while the full Spark pipeline runs in cloud. Built by Srivatsav Shrikanth.")
-
-#Sidebar : Cloud hooks
-st.sidebar.header("Cloud Storage")
-
-if st.sidebar.button("List cloud artifacts"):
-    try:
-        out = subprocess.check_output(["gcloud", "storage", "ls", "-r", f"{ARTIFACTS}/"], text=True)
-        lines = [l.strip() for l in out.splitlines() if l.strip()]
-        if not lines:
-            st.sidebar.info("(empty)")
-        else:
-            for path in lines:
-                if path.startswith("gs://"):
-                    st.sidebar.markdown(f"- [{path}]({path})")
-    except subprocess.CalledProcessError as e:
-        st.sidebar.error((e.output or str(e)).strip())
-
-
-#Data loaders
-@st.cache_data
-def load_demo(_v=DATA_VERSION):
-    recs = pd.read_csv(LOCAL_RECS)
-    u = pd.read_csv(MAP_USER)
-    i = pd.read_csv(MAP_ITEM)
-    recs = recs.merge(u, on="user_id", how="left").merge(i, on="item_id", how="left")
-    return recs, u, i
-
-
-import zipfile
-
 def ensure_bundle_extracted():
-
+    """Unzip local bundle if not already extracted."""
+    # If either root has map_user/ we’re good
     if os.path.isdir(os.path.join(BUNDLE_ROOT_A, "map_user")) or \
        os.path.isdir(os.path.join(BUNDLE_ROOT_B, "map_user")):
         return
-
     try:
         os.makedirs("artifacts_demo", exist_ok=True)
         if os.path.exists(BUNDLE_ZIP):
             with zipfile.ZipFile(BUNDLE_ZIP, "r") as zf:
                 zf.extractall("artifacts_demo")
         else:
-            st.warning(f"Bundle zip not found at: {BUNDLE_ZIP}")
+            st.warning(f"Bundle zip not found at: {BUNDLE_ZIP}. "
+                       f"Use the download button below to fetch it.")
     except Exception as e:
         st.warning(f"Could not unzip bundle: {e}")
 
-
-
-ensure_bundle_extracted()
-
-
-import glob
+@st.cache_resource
+def _load_bundle():
+    """Load the frozen offline bundle once (no Spark)."""
+    # Try both possible roots
+    for root in [BUNDLE_ROOT_A, BUNDLE_ROOT_B]:
+        if os.path.isdir(os.path.join(root, "model")):
+            return load_bundle(root)
+    # Fallback to A (will raise if not present)
+    return load_bundle(BUNDLE_ROOT_A)
 
 @st.cache_data
-def get_available_users(n=12):
-
-
-    #Curated pool
+def get_available_users(n=100):
+    """Sample a set of user_ids from the bundle for the dropdown."""
     try:
-        if os.path.exists(USER_POOL):
-            dfp = pd.read_csv(USER_POOL, usecols=["user_id"])
-            pool = dfp["user_id"].dropna().astype(str).unique().tolist()
-            if pool:
-                k = min(n, len(pool))
-                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+        b = _load_bundle()
+        pool = b["map_user"]["user_id"].dropna().astype(str).unique().tolist()
+        if not pool:
+            return []
+        k = min(n, len(pool))
+        return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
     except Exception:
-        pass
-
-    #Bundle CSV
-    try:
-        csv_path = bundle_user_csv_path()
-        if csv_path:
-            dfc = pd.read_csv(csv_path, usecols=["user_id"])
-            pool = dfc["user_id"].dropna().astype(str).unique().tolist()
-            if pool:
-                k = min(n, len(pool))
-                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
-    except Exception:
-        pass
-
-    #Bundle Parquet
-    try:
-        parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_A, "map_user", "part-*.parquet")))
-        if not parts:
-            parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_B, "map_user", "part-*.parquet")))
-        if parts:
-            dfp = pd.read_parquet(parts[0], columns=["user_id"], engine="pyarrow")
-            pool = dfp["user_id"].dropna().astype(str).unique().tolist()
-            if pool:
-                k = min(n, len(pool))
-                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
-    except Exception:
-        pass
-
-    #Fallback
-    try:
-        dfm = pd.read_csv(MAP_USER, usecols=["user_id"])
-        pool = dfm["user_id"].dropna().astype(str).unique().tolist()
-        return sorted(pool)
-    except Exception:
+        # Fallback attempts: CSV from bundle or parquet
+        try:
+            csv_path = bundle_user_csv_path()
+            if csv_path:
+                dfc = pd.read_csv(csv_path, usecols=["user_id"])
+                pool = dfc["user_id"].dropna().astype(str).unique().tolist()
+                if pool:
+                    k = min(n, len(pool))
+                    return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+        except Exception:
+            pass
+        # Last resort: empty
         return []
 
+def _run_gcloud(args):
+    full = ["gcloud", "--quiet", "--project", PROJECT_ID] + args
+    p = subprocess.run(full, capture_output=True, text=True)
+    return (p.returncode == 0, p.stdout.strip())
 
-
-
-
-
-try:
-    recs, users, items = load_demo()
-
-    RECS_USER_IDS = set(recs["user_id"].astype(str).unique())
-    
-except FileNotFoundError as e:
-    st.error(f"Missing demo file: {e}")
-    st.stop()
-
-colL, colR = st.columns([1,2], gap="large")
-
-with colL:
-    st.subheader("Pick a user")
-    available_users = get_available_users(n=100)  # bigger pool is fine
-    # keep only those that actually have recommendations in sample.csv
-    options = [str(u) for u in available_users if str(u) in RECS_USER_IDS]
-
-    options = [str(u) for u in available_users if str(u) in RECS_USER_IDS]
-    if not options:
-        #Fallback
-        options = sorted(RECS_USER_IDS)
-    
-    user = st.selectbox("User ID", options=sorted(options), index=0)
-
-
-
-    k = st.slider("Top-K", min_value=3, max_value=10, value=10, step=1)
-    show_idx = st.toggle("Show internal indices", value=False)
-
-
-
-
-with colR:
-    st.subheader("Top-K Recommendations")
-
-    #Top-K for the selected user
-    df = (
-        recs.loc[recs["user_id"].astype(str).eq(str(user))]
-            .sort_values("score", ascending=False)
-            .head(k)
-            .copy()
-    )
-    if df.empty:
-        st.info(
-            "No demo recommendations for this user in the small sample CSV. "
-            "Pick another user ID from the dropdown."
-        )
-        st.stop()
-
-    readable_item_col = next(
-        (c for c in ["item_name", "name", "business_name", "title", "item"]
-         if c in df.columns),
-        "item_id"  #fallback to internal id if no readable name exists
-    )
-
-    if show_idx:
-        #explicitly showing ids
-        table = (
-            df[["user_id", "item_id", "score"]]
-            .rename(columns={
-                "user_id": "user_id (internal)",
-                "item_id": "item_id (internal)"
-            })
-        )
-        y_field = "item_id"      #chart labels
-        y_title = "Item ID (internal)"
-    else:
-        #showing a readable item label if available
-        table = (
-            df[[readable_item_col, "score"]]
-            .rename(columns={readable_item_col: "recommended_item"})
-        )
-        y_field = readable_item_col
-        y_title = "Recommended item"
-
-    #Table
-    st.dataframe(table, width="stretch", hide_index=True)
-
-    #Chart
-    chart = (
-        alt.Chart(df)
-        .mark_bar()
-        .encode(
-            x=alt.X("score:Q", title="Predicted score"),
-            y=alt.Y(f"{y_field}:N", sort="-x", title=y_title),
-        )
-        .properties(height=300)
-    )
-    st.altair_chart(chart)
-
-    #download
-    csv_bytes = table.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download this Top-K CSV",
-        data=csv_bytes,
-        file_name="topk.csv",
-        mime="text/csv",
-    )
-
-
-
-if show_idx:
-    st.caption("Internal indices preview")
-    with st.expander("Show merged demo frame"):
-        st.dataframe(df, width="stretch")
-
-
-
-
+def _ensure_demo_dir():
+    os.makedirs("artifacts_demo", exist_ok=True)
 
 def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
-    import json, pathlib
-    p = pathlib.Path(local_path)
+    p = Path(local_path)
     if not p.exists():
-        st.info("No local metrics found yet. Use the steps below to sync a metrics file from GCS.")
+        st.info("No local metrics found yet. Use the section below to sync a metrics file from GCS.")
         return
-
     try:
         m = json.loads(p.read_text())
     except Exception as e:
         st.warning(f"Could not parse metrics.json: {e}")
         return
 
-    # Header
     st.subheader("Model metrics")
-
     cols = st.columns(3)
     shown = False
 
@@ -300,125 +153,226 @@ def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
             if k in m:
                 st.write(f"- **{k}**: {m[k]}")
 
-#Metrics panel
+# ---------------- SIDEBAR: CLOUD HOOKS ----------------
+st.sidebar.header("Cloud Storage (GCS)")
+if st.sidebar.button("List cloud artifacts"):
+    try:
+        ok, out = _run_gcloud(["storage", "ls", "-r", f"{ARTIFACTS}/"])
+        if not ok or not out.strip():
+            st.sidebar.info("(no output — ensure gcloud is installed & authenticated)")
+        else:
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            for path in lines:
+                if path.startswith("gs://"):
+                    st.sidebar.markdown(f"- [{path}]({path})")
+    except Exception as e:
+        st.sidebar.error(str(e))
 
+# ---------------- BUNDLE INIT ----------------
+ensure_bundle_extracted()
+try:
+    bundle = _load_bundle()
+except Exception as e:
+    st.error(f"Failed to load offline bundle: {e}")
+    st.stop()
+
+# ---------------- MAIN LAYOUT ----------------
+colL, colR = st.columns([1, 2], gap="large")
+
+with colL:
+    st.subheader("Pick a user")
+
+    available_users = get_available_users(n=100)
+    if not available_users:
+        st.error("No users found in the bundle’s map_user. Make sure the zip extracted correctly.")
+        st.stop()
+
+    user = st.selectbox("User ID", options=available_users, index=0)
+    k = st.slider("Top-K", min_value=3, max_value=20, value=10, step=1)
+    show_idx = st.toggle("Show internal IDs", value=False)
+
+    st.markdown("**Exclude seen items (optional)**")
+    seen_up = st.file_uploader(
+        "Upload a CSV with columns: user_id,item_id",
+        type=["csv"],
+        accept_multiple_files=False
+    )
+    seen_df = None
+    if seen_up is not None:
+        try:
+            s = pd.read_csv(seen_up)
+            need = {"user_id", "item_id"}
+            if not need.issubset(set(s.columns)):
+                st.warning(f"Seen CSV must have columns {need}. Got {list(s.columns)}.")
+            else:
+                seen_df = s.astype({"user_id": str, "item_id": str})
+        except Exception as e:
+            st.warning(f"Could not read seen CSV: {e}")
+
+with colR:
+    st.subheader("Top-K Recommendations")
+
+    # Compute recommendations with the pure-NumPy offline engine
+    res = recommend(bundle, user_id=str(user), k=k, seen_df=seen_df)
+    items = pd.DataFrame(res.get("items", []))
+
+    if items.empty:
+        st.info("No recommendations for this user (or all were excluded as seen). Try another user.")
+        st.stop()
+
+    # Try to attach a readable item name from optional MAP_ITEM CSV
+    readable_col = None
+    try:
+        if os.path.exists(MAP_ITEM):
+            mi = pd.read_csv(MAP_ITEM)
+            for c in ["name", "business_name", "title", "item_name"]:
+                if c in mi.columns:
+                    readable_col = c
+                    break
+            if readable_col:
+                items = items.merge(mi[["item_id", readable_col]], on="item_id", how="left")
+    except Exception:
+        pass
+
+    # Choose presentation
+    if show_idx or readable_col is None:
+        table = items[["item_id", "score"]].rename(columns={"item_id": "item_id (internal)"})
+        y_field = "item_id (internal)"
+        y_title = "Item ID (internal)"
+        df_for_chart = table.rename(columns={"item_id (internal)": "label_for_chart"})
+    else:
+        table = items[[readable_col, "score"]].rename(columns={readable_col: "recommended_item"})
+        y_field = "recommended_item"
+        y_title = "Recommended item"
+        df_for_chart = table.rename(columns={"recommended_item": "label_for_chart"})
+
+    # Table
+    st.dataframe(table, width="stretch", hide_index=True)
+
+    # Chart
+    chart = (
+        alt.Chart(df_for_chart)
+        .mark_bar()
+        .encode(
+            x=alt.X("score:Q", title="Predicted score"),
+            y=alt.Y("label_for_chart:N", sort="-x", title=y_title),
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+    # Download
+    st.download_button(
+        "Download this Top-K CSV",
+        data=table.to_csv(index=False).encode("utf-8"),
+        file_name=f"topk_user_{user}.csv",
+        mime="text/csv",
+    )
+
+if show_idx:
+    st.caption("Internal results (debug)")
+    with st.expander("Show raw recommendation rows"):
+        st.dataframe(items, width="stretch")
+
+# ---------------- METRICS PANEL ----------------
+st.divider()
 render_metrics_from_local()
 
-#offline bundle section
+# ---------------- OFFLINE BUNDLE SECTION ----------------
 st.divider()
 st.subheader("Offline serving bundle")
-
 st.caption(
     "Download the frozen model + maps to run recommendations locally without GCS. "
-    "This is the exact snapshot we froze from the best cloud run."
+    "This is the exact snapshot frozen from the best cloud run."
 )
-
 st.link_button("⬇️ Download CityEats-ALS_best_bundle.zip", BUNDLE_URL)
 
 with st.expander("How to use the bundle (local quickstart)"):
     st.markdown(
         """
-        1. Unzip the file. You will get `model/`, `map_user/`, and `map_item/`.
-        2. Run the CLI pointing to those folders (example):
+1. Unzip the file. You will get `model/`, `map_user/`, and `map_item/`.
+2. This Streamlit app already uses the offline bundle automatically once unzipped.
+3. (Optional) CLI usage example for the same bundle:
 
-           ```bash
-           python -m src.serving.cli \
-             --model-dir /path/to/CityEats-ALS_best_bundle/model \
-             --ui-map    /path/to/CityEats-ALS_best_bundle/map_user \
-             --bi-map    /path/to/CityEats-ALS_best_bundle/map_item \
-             --user-id 41397 --k 10
-           ```
-        3. You should see Top-K items with scores printed for the given user id.
+   ```bash
+   python -m src.serving.cli \
+     --model-dir /path/to/CityEats-ALS_best_bundle/model \
+     --ui-map    /path/to/CityEats-ALS_best_bundle/map_user \
+     --bi-map    /path/to/CityEats-ALS_best_bundle/map_item \
+     --user-id 41397 --k 10
+   ```
         """
     )
 
-
-
-import re
-
-#Sync latest cloud metrics
-import shutil
-
+# ---------------- SYNC LATEST CLOUD METRICS ----------------
 st.subheader("Sync latest cloud metrics")
-
 HAS_GCLOUD = shutil.which("gcloud") is not None
-PROJECT_ID = "sri99-cs777"
-USER_ID = os.getenv("USER", "sri99")
-BEST_METRICS = f"gs://cityeats-{USER_ID}/artifacts/runs/best/metrics/metrics.json"
-
-def _run_gcloud(args):
-    full = ["gcloud", "--quiet", "--project", PROJECT_ID] + args
-    p = subprocess.run(full, capture_output=True, text=True)
-    return (p.returncode == 0, p.stdout.strip())
-
-def _ensure_demo_dir():
-    os.makedirs("artifacts_demo", exist_ok=True)
-
-def _latest_part_metrics():
-    ok, out = _run_gcloud(["storage", "ls", "--recursive", f"gs://cityeats-{USER_ID}/artifacts/"])
-    if not ok or not out:
-        return ""
-    candidates = [s.strip() for s in out.splitlines()
-                  if s.strip().endswith(".json") and "/metrics/" in s and "part-" in s]
-    return sorted(candidates)[-1] if candidates else ""
+BEST_METRICS = f"{BUCKET}/artifacts/runs/best/metrics/metrics.json"
 
 if not HAS_GCLOUD:
     st.info(
-        "This hosted demo doesn’t have Google Cloud CLI or credentials, "
-        "so syncing from GCS is disabled. The metrics shown above are the "
-        "latest frozen metrics bundled with the repo."
+        "This environment doesn’t have Google Cloud CLI or credentials, "
+        "so syncing from GCS is disabled. The metrics shown above are "
+        "the latest frozen metrics bundled with the repo."
     )
 else:
-    if st.button("Pull newest metrics.json from GCS"):
-        _ensure_demo_dir()
-        ok, _ = _run_gcloud(["storage", "cp", BEST_METRICS, "artifacts_demo/metrics.json"])
-        if ok:
-            st.success("Pulled frozen BEST metrics.json from GCS.")
-            st.caption(BEST_METRICS)
-            render_metrics_from_local()
-        else:
-            part = _latest_part_metrics()
-            if not part:
-                st.warning("No metrics part file found in GCS (yet).")
+    col_sync1, col_sync2 = st.columns([1,2])
+    with col_sync1:
+        if st.button("Pull newest metrics.json from GCS"):
+            _ensure_demo_dir()
+            ok, _ = _run_gcloud(["storage", "cp", BEST_METRICS, "artifacts_demo/metrics.json"])
+            if ok:
+                st.success("Pulled frozen BEST metrics.json from GCS.")
+                st.caption(BEST_METRICS)
+                render_metrics_from_local()
             else:
-                ok2, _ = _run_gcloud(["storage", "cp", part, "artifacts_demo/metrics.json"])
-                if ok2:
-                    st.success("Pulled latest Spark metrics part file from GCS.")
-                    st.caption(part)
-                    render_metrics_from_local()
+                # Fallback: look for latest part file
+                ok_ls, out_ls = _run_gcloud(["storage", "ls", "--recursive", f"{BUCKET}/artifacts/"])
+                if not ok_ls or not out_ls:
+                    st.warning("No metrics found in GCS (yet) or no access.")
                 else:
-                    st.error("Failed to pull metrics from GCS. Make sure you’re authenticated in Cloud Shell.")
+                    candidates = [
+                        s.strip() for s in out_ls.splitlines()
+                        if s.strip().endswith(".json") and "/metrics/" in s and "part-" in s
+                    ]
+                    if not candidates:
+                        st.warning("No metrics part file found in GCS.")
+                    else:
+                        part = sorted(candidates)[-1]
+                        ok2, _ = _run_gcloud(["storage", "cp", part, "artifacts_demo/metrics.json"])
+                        if ok2:
+                            st.success("Pulled latest Spark metrics part file from GCS.")
+                            st.caption(part)
+                            render_metrics_from_local()
+                        else:
+                            st.error("Failed to pull metrics from GCS. Ensure you’re authenticated (gcloud auth login).")
 
-
-
-
+# ---------------- ABOUT / MAPPING ----------------
 st.divider()
-
 st.markdown(
-"""
+    """
 **How this demo maps to the real system**
 
-- This page reads tiny CSVs checked into git.
-- The real pipeline runs Spark ALS on GCP Dataproc, writes Parquet + JSON metrics to **GCS**:
+- This page uses a **frozen offline bundle** (model + maps) for instant, Spark-free recommendations.
+- The full pipeline runs Spark ALS on **GCP Dataproc**, writing Parquet + JSON metrics to **GCS**:
   - Runs: `gs://cityeats-<user>/artifacts/runs/...`
   - Metrics: `gs://cityeats-<user>/artifacts/metrics/...`
-- Use the sidebar button to confirm your cloud artifacts exist.
+- Use the sidebar to confirm your cloud artifacts exist.
 """
 )
 
 st.divider()
-
-st.markdown("""
+st.markdown(
+    """
 ### About this Demo
 
 This demo showcases the **CityEats-ALS** recommender system, a scalable ML pipeline built with **PySpark ALS** and deployed on **Google Cloud Dataproc**.
 
 - **Dataset:** 50M+ explicit Yelp ratings (Tier B scale)
-- **Model:** ALS (rank=64, regParam=0.1, maxIter=12)
-- **Metrics:** RMSE ≈ 0.407 (explicit ratings)
+- **Model:** ALS (e.g., rank=64, regParam=0.1, maxIter=12)
 - **Artifacts:** Stored on `gs://cityeats-sri99/artifacts/runs/best/`
 - **Purpose:** Visualize top-N recommendations, metrics, and artifact structure
 
-This Streamlit version uses compact CSV samples to mirror the behavior of the full cloud pipeline : lightweight and explainable.
-""")
-
+This Streamlit version uses a compact, frozen bundle to mirror the behavior of the full cloud pipeline—**lightweight and explainable**, no Spark required.
+"""
+)
