@@ -27,11 +27,9 @@ def _normalize_pd_map_columns(pdf: pd.DataFrame) -> pd.DataFrame:
     return pdf
 
 def _normalize_spark_map_columns(df):
-
     for old, new in [("userIndex","user_idx"), ("itemIndex","item_idx"), ("business_id","item_id")]:
         if old in df.columns and new not in df.columns:
             df = df.withColumnRenamed(old, new)
-
     for c in ("user_idx", "item_idx"):
         if c in df.columns:
             df = df.withColumn(c, F.col(c).cast("int"))
@@ -69,10 +67,6 @@ def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
             raise KeyError(f"Expected columns {cols} not found. Got {got}; missing {missing}")
         return df.select(*cols)
 
-
-
-
-
 def _abs_norm(p: str) -> str:
     p = pathlib.Path(p).resolve()
     return "file:///" + str(p).replace("\\", "/").lstrip("/")
@@ -91,23 +85,17 @@ def main():
     spark = (
         SparkSession.builder
         .appName("CityEats-CLI")
-        #Hadoop conf flip below is the key
         .config("spark.hadoop.io.native.lib.available", "false")
         .config("spark.sql.warehouse.dir", "/tmp")
         .getOrCreate()
     )
 
-    jconf = spark._jsc.hadoopConfiguration()
-    jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
-    jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
-    jconf.set("fs.file.impl.disable.cache", "true")
-    jconf.set("io.native.lib.available", "false")
-
-
-  
+    #RawLocalFileSystem for parquet IO
     jconf = spark._jsc.hadoopConfiguration()
     jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
     jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+    jconf.set("fs.file.impl.disable.cache", "true")
+    jconf.set("io.native.lib.available", "false")
 
     try:
         ui_path    = _abs_norm(args.ui_map)
@@ -115,17 +103,25 @@ def main():
         model_path = _abs_norm(args.model_dir)
         seen_path  = _abs_norm(args.seen) if args.seen else None
 
+        #Read and normalize maps
         ui = _read_map_as_spark_df(spark, ui_path, ["user_id", "user_idx"])
         bi = _read_map_as_spark_df(spark, bi_path, ["item_id", "item_idx"])
-        model = ALSModel.load(model_path)
 
+        prev_fs = jconf.get("fs.file.impl")
+        jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
+        try:
+            model = ALSModel.load(model_path)
+        finally:
+            jconf.set("fs.file.impl", prev_fs or "org.apache.hadoop.fs.RawLocalFileSystem")
+
+
+        #locate user
         u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")
         if u.limit(1).count() == 0:
             print(json.dumps({"msg": f"unknown user_id {args.user_id}"}))
             return
 
-        # ALS recommendForUserSubset returns a struct with item index and rating.
-        # In our bundle/maps: item index column is "item_idx", external id is "item_id".
+        # get recs
         recs = (
             model.recommendForUserSubset(u, args.k)
             .selectExpr("explode(recommendations) as r")
