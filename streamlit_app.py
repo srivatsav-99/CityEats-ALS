@@ -19,7 +19,8 @@ BUNDLE_URL = (
 
 BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
 BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle" 
-BUNDLE_ROOT_B = "artifacts_demo"                          
+BUNDLE_ROOT_B = "artifacts_demo"
+USER_POOL = "artifacts_demo/user_pool.csv"
 
 def bundle_user_csv_path() -> str:
     """Return the path to map_user.csv regardless of how the zip extracted"""
@@ -94,18 +95,24 @@ import glob
 @st.cache_data
 def get_available_users(n=12):
 
+
+    #Curated pool
+    try:
+        if os.path.exists(USER_POOL):
+            dfp = pd.read_csv(USER_POOL, usecols=["user_id"])
+            pool = dfp["user_id"].dropna().astype(str).unique().tolist()
+            if pool:
+                k = min(n, len(pool))
+                return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
+    except Exception:
+        pass
+
     #Bundle CSV
     try:
         csv_path = bundle_user_csv_path()
         if csv_path:
             dfc = pd.read_csv(csv_path, usecols=["user_id"])
-            pool = (
-                pd.Series(dfc["user_id"])
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist()
-            )
+            pool = dfc["user_id"].dropna().astype(str).unique().tolist()
             if pool:
                 k = min(n, len(pool))
                 return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
@@ -114,38 +121,26 @@ def get_available_users(n=12):
 
     #Bundle Parquet
     try:
-        import glob
         parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_A, "map_user", "part-*.parquet")))
         if not parts:
             parts = sorted(glob.glob(os.path.join(BUNDLE_ROOT_B, "map_user", "part-*.parquet")))
         if parts:
             dfp = pd.read_parquet(parts[0], columns=["user_id"], engine="pyarrow")
-            pool = (
-                pd.Series(dfp["user_id"])
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist()
-            )
+            pool = dfp["user_id"].dropna().astype(str).unique().tolist()
             if pool:
                 k = min(n, len(pool))
                 return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
     except Exception:
         pass
 
-    #Fallback to repo CSV
+    #Fallback
     try:
         dfm = pd.read_csv(MAP_USER, usecols=["user_id"])
-        pool = (
-            pd.Series(dfm["user_id"])
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
-        )
+        pool = dfm["user_id"].dropna().astype(str).unique().tolist()
         return sorted(pool)
     except Exception:
         return []
+
 
 
 
