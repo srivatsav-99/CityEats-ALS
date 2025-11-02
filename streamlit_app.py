@@ -56,19 +56,31 @@ def bundle_user_csv_path() -> str:
     return ""
 
 def ensure_bundle_extracted():
-    """Unzip local bundle if not already extracted."""
-    # If either root has map_user/ we’re good
-    if os.path.isdir(os.path.join(BUNDLE_ROOT_A, "map_user")) or \
-       os.path.isdir(os.path.join(BUNDLE_ROOT_B, "map_user")):
+    """Unzip the bundle so we have artifacts_demo/CityEats-ALS_best_bundle/..."""
+    os.makedirs("artifacts_demo", exist_ok=True)
+    root = BUNDLE_ROOT_A  # artifacts_demo/CityEats-ALS_best_bundle
+    # if model already present, we're done
+    if os.path.isdir(os.path.join(root, "model")):
         return
+
+    # If the zip isn’t present (e.g. Streamlit Cloud didn’t pull LFS), download it.
+    if not os.path.exists(BUNDLE_ZIP):
+        try:
+            import requests
+            url = BUNDLE_URL
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            with open(BUNDLE_ZIP, "wb") as f:
+                f.write(r.content)
+        except Exception as e:
+            st.warning(f"Bundle zip not found and download failed: {e}")
+            return
+
+    # Extract zip into artifacts_demo/
     try:
-        os.makedirs("artifacts_demo", exist_ok=True)
-        if os.path.exists(BUNDLE_ZIP):
-            with zipfile.ZipFile(BUNDLE_ZIP, "r") as zf:
-                zf.extractall("artifacts_demo")
-        else:
-            st.warning(f"Bundle zip not found at: {BUNDLE_ZIP}. "
-                       f"Use the download button below to fetch it.")
+        import zipfile
+        with zipfile.ZipFile(BUNDLE_ZIP, "r", allowZip64=True) as zf:
+            zf.extractall("artifacts_demo")
     except Exception as e:
         st.warning(f"Could not unzip bundle: {e}")
 
