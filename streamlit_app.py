@@ -21,6 +21,8 @@ BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
 BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle" 
 BUNDLE_ROOT_B = "artifacts_demo"
 USER_POOL = "artifacts_demo/user_pool.csv"
+DATA_VERSION = "v3" 
+
 
 def bundle_user_csv_path() -> str:
     """Return the path to map_user.csv regardless of how the zip extracted"""
@@ -59,13 +61,13 @@ if st.sidebar.button("List cloud artifacts"):
 
 #Data loaders
 @st.cache_data
-def load_demo():
+def load_demo(_v=DATA_VERSION):
     recs = pd.read_csv(LOCAL_RECS)
     u = pd.read_csv(MAP_USER)
     i = pd.read_csv(MAP_ITEM)
-    # Join readable ids (idxs stand in for titles in this tiny demo)
     recs = recs.merge(u, on="user_id", how="left").merge(i, on="item_id", how="left")
     return recs, u, i
+
 
 import zipfile
 
@@ -159,9 +161,19 @@ colL, colR = st.columns([1,2], gap="large")
 
 with colL:
     st.subheader("Pick a user")
-    available_users = get_available_users(n=15)
-    st.caption("Select any user ID to refresh recommendations (loaded from the frozen bundle when available).")
-    user = st.selectbox("User ID", options=available_users, index=0)
+    available_users = get_available_users(n=100)  # bigger pool is fine
+    # keep only those that actually have recommendations in sample.csv
+    options = [str(u) for u in available_users if str(u) in RECS_USER_IDS]
+
+    if not options:
+        st.warning("No overlap between user pool and demo recommendations. "
+                   "Add rows for these users to recs_top10_sample_csv/sample.csv "
+                   "or pick different user IDs.")
+        st.stop()
+    
+    # pick a stable default (first option)
+    user = st.selectbox("User ID", options=sorted(options), index=0)
+
 
     k = st.slider("Top-K", min_value=3, max_value=10, value=10, step=1)
     show_idx = st.toggle("Show internal indices", value=False)
