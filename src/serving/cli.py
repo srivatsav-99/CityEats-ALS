@@ -50,7 +50,6 @@ def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
         raise FileNotFoundError(f"No parquet files found under {local_dir}")
 
     if is_windows:
-
         pdfs = [pd.read_parquet(p, engine="pyarrow") for p in parts]
         pdf = pd.concat(pdfs, ignore_index=True)
         pdf = _normalize_pd_map_columns(pdf)
@@ -69,7 +68,10 @@ def _read_map_as_spark_df(spark, dir_path: str, cols: list[str]):
 
 def _abs_norm(p: str) -> str:
     p = pathlib.Path(p).resolve()
-    return "file:///" + str(p).replace("\\", "/").lstrip("/")
+    s = str(p)
+    if platform.system().lower().startswith("win"):
+        return s
+    return "file://" + s
 
 def main():
     ap = argparse.ArgumentParser()
@@ -87,20 +89,12 @@ def main():
         .appName("CityEats-CLI")
         .config("spark.hadoop.io.native.lib.available", "false")
         .config("spark.sql.warehouse.dir", "/tmp")
+        # Start in LocalFileSystem mode so model load doesn't need winutils
+        .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
+        .config("spark.hadoop.fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+        .config("spark.hadoop.fs.file.impl.disable.cache", "true")
         .getOrCreate()
     )
-
-
-    jconf = spark._jsc.hadoopConfiguration()
-    
-    _prev_fs   = jconf.get("fs.file.impl")
-    _prev_abs  = jconf.get("fs.AbstractFileSystem.file.impl")
-    
-    jconf.set("fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem")
-    jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
-    jconf.set("fs.file.impl.disable.cache", "true")
-    jconf.set("io.native.lib.available", "false")
-
 
     try:
         ui_path    = _abs_norm(args.ui_map)
@@ -112,17 +106,17 @@ def main():
         ui = _read_map_as_spark_df(spark, ui_path, ["user_id", "user_idx"])
         bi = _read_map_as_spark_df(spark, bi_path, ["item_id", "item_idx"])
 
-        # Load the model while LocalFileSystem is active (Windows-safe),
-        # then switch to RawLocalFileSystem for normal parquet IO afterwards.
-        try:
-            model = ALSModel.load(model_path)
-        finally:
-            jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
-            jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+        # Load model while LocalFileSystem is active
+        model = ALSModel.load(model_path)
 
+        # After load, switch to RawLocalFileSystem for parquet IO
+        jconf = spark._jsc.hadoopConfiguration()
+        jconf.set("fs.file.impl", "org.apache.hadoop.fs.RawLocalFileSystem")
+        jconf.set("fs.AbstractFileSystem.file.impl", "org.apache.hadoop.fs.local.Local")
+        jconf.set("fs.file.impl.disable.cache", "true")
+        jconf.set("io.native.lib.available", "false")
 
-
-        #locate user
+        # locate user
         u = ui.filter(F.col("user_id") == args.user_id).select("user_idx")
         if u.limit(1).count() == 0:
             print(json.dumps({"msg": f"unknown user_id {args.user_id}"}))
