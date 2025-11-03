@@ -1,4 +1,4 @@
-# streamlit_app.py
+
 import os
 import io
 import re
@@ -13,37 +13,35 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 
-# --- Offline recommender (pure Python/NumPy) ---
-# Assumes you have src/serving/offline_recs.py with load_bundle() and recommend()
+#Offline recommender
 from src.serving.offline_recs import load_bundle, recommend
 
-# ---------------- UI CONFIG ----------------
+#UI CONFIG
 st.set_page_config(page_title="CityEats-ALS — Demo", layout="wide")
 st.title("CityEats-ALS — Scalable Food Recommender (Demo)")
 st.caption("Streamlit demo using the frozen offline bundle (no Spark). Built by Srivatsav Shrikanth.")
 
-# ---------------- PATHS / CONSTANTS ----------------
-# Local, human-readable maps (optional; used only to show readable names if present)
+#PATHS / CONSTANTS
 MAP_ITEM = "map_item/map_item.csv"
 
-# GCS bucket + artifacts (sidebar cloud browsing + metrics sync)
+#GCS bucket and artifacts
 USER_ID_ENV = os.getenv("USER", "sri99")
 PROJECT_ID = "sri99-cs777"
 BUCKET = f"gs://cityeats-{USER_ID_ENV}"
 ARTIFACTS = f"{BUCKET}/artifacts"
 
-# Public GitHub LFS URL for the frozen serving bundle
+
 BUNDLE_URL = (
     "https://media.githubusercontent.com/media/"
     "srivatsav-99/CityEats-ALS/main/artifacts_demo/CityEats-ALS_best_bundle.zip"
 )
 
-# Local bundle locations
+#Local bundle locations
 BUNDLE_ZIP = "artifacts_demo/CityEats-ALS_best_bundle.zip"
 BUNDLE_ROOT_A = "artifacts_demo/CityEats-ALS_best_bundle"   # typical unzip root
 BUNDLE_ROOT_B = "artifacts_demo"                             # fallback root (zip extracted flat)
 
-# ---------------- HELPERS ----------------
+#helpers
 def bundle_user_csv_path() -> str:
     """Return the path to map_user.csv regardless of how the zip extracted."""
     candidates = [
@@ -59,11 +57,10 @@ def ensure_bundle_extracted():
     """Unzip the bundle so we have artifacts_demo/CityEats-ALS_best_bundle/..."""
     os.makedirs("artifacts_demo", exist_ok=True)
     root = BUNDLE_ROOT_A  # artifacts_demo/CityEats-ALS_best_bundle
-    # if model already present, we're done
+    #if model already present then done
     if os.path.isdir(os.path.join(root, "model")):
         return
 
-    # If the zip isn’t present (e.g. Streamlit Cloud didn’t pull LFS), download it.
     if not os.path.exists(BUNDLE_ZIP):
         try:
             import requests
@@ -76,9 +73,9 @@ def ensure_bundle_extracted():
             st.warning(f"Bundle zip not found and download failed: {e}")
             return
 
-    # Extract zip into artifacts_demo/
+    #Extract zip into artifacts_demo/
     try:
-        import zipfile
+        
         with zipfile.ZipFile(BUNDLE_ZIP, "r", allowZip64=True) as zf:
             zf.extractall("artifacts_demo")
     except Exception as e:
@@ -86,17 +83,17 @@ def ensure_bundle_extracted():
 
 @st.cache_resource
 def _load_bundle():
-    """Load the frozen offline bundle once (no Spark)."""
-    # Try both possible roots
+    """Load the frozen offline bundle once (no Spark)"""
+    #Try both possible roots
     for root in [BUNDLE_ROOT_A, BUNDLE_ROOT_B]:
         if os.path.isdir(os.path.join(root, "model")):
             return load_bundle(root)
-    # Fallback to A (will raise if not present)
+    #Fallback to A
     return load_bundle(BUNDLE_ROOT_A)
 
 @st.cache_data
 def get_available_users(n=100):
-    """Sample a set of user_ids from the bundle for the dropdown."""
+    """Sample a set of user_ids from the bundle for the dropdown"""
     try:
         b = _load_bundle()
         pool = b["map_user"]["user_id"].dropna().astype(str).unique().tolist()
@@ -105,7 +102,7 @@ def get_available_users(n=100):
         k = min(n, len(pool))
         return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
     except Exception:
-        # Fallback attempts: CSV from bundle or parquet
+
         try:
             csv_path = bundle_user_csv_path()
             if csv_path:
@@ -116,7 +113,6 @@ def get_available_users(n=100):
                     return sorted(pd.Series(pool).sample(k, random_state=42).tolist())
         except Exception:
             pass
-        # Last resort: empty
         return []
 
 def _run_gcloud(args):
@@ -142,13 +138,13 @@ def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
     cols = st.columns(3)
     shown = False
 
-    # Ratings metric
+    #ratings metric
     if isinstance(m, dict) and m.get("rmse") is not None:
         cols[0].metric("RMSE (ratings)", f"{float(m['rmse']):.3f}")
         st.caption("Lower RMSE indicates better reconstruction of user–item ratings.")
         shown = True
 
-    # Ranking metrics (if present)
+    #ranking metrics (if present)
     if isinstance(m, dict) and m.get("p_at_10") is not None:
         cols[1].metric("Precision@10", f"{float(m['p_at_10']):.3f}")
         shown = True
@@ -165,22 +161,49 @@ def render_metrics_from_local(local_path="artifacts_demo/metrics.json"):
             if k in m:
                 st.write(f"- **{k}**: {m[k]}")
 
-# ---------------- SIDEBAR: CLOUD HOOKS ----------------
-st.sidebar.header("Cloud Storage (GCS)")
-if st.sidebar.button("List cloud artifacts"):
-    try:
-        ok, out = _run_gcloud(["storage", "ls", "-r", f"{ARTIFACTS}/"])
-        if not ok or not out.strip():
-            st.sidebar.info("(no output — ensure gcloud is installed & authenticated)")
-        else:
-            lines = [l.strip() for l in out.splitlines() if l.strip()]
-            for path in lines:
-                if path.startswith("gs://"):
-                    st.sidebar.markdown(f"- [{path}]({path})")
-    except Exception as e:
-        st.sidebar.error(str(e))
 
-# ---------------- BUNDLE INIT ----------------
+st.sidebar.header("Cloud Storage (GCS)")
+if shutil.which("gcloud") is None:
+    st.sidebar.caption("gcloud not available in this environment.")
+else:
+    if st.sidebar.button("List cloud artifacts"):
+        try:
+            ok, out = _run_gcloud(["storage", "ls", "-r", f"{ARTIFACTS}/"])
+            if not ok or not out.strip():
+                st.sidebar.info("(no output — ensure gcloud is authenticated)")
+            else:
+                for path in (l.strip() for l in out.splitlines() if l.strip()):
+                    if path.startswith("gs://"):
+                        st.sidebar.markdown(f"- [{path}]({path})")
+        except Exception as e:
+            st.sidebar.error(str(e))
+
+
+
+user_csv_up = st.sidebar.file_uploader(
+    "Upload User CSV (one column: user_id or user)",
+    type=["csv"],
+    accept_multiple_files=False
+)
+uploaded_user_ids = []
+if user_csv_up is not None:
+    try:
+        udf = pd.read_csv(user_csv_up)
+        #normalize column names
+        udf.columns = [c.strip().lower() for c in udf.columns]
+        col = "user_id" if "user_id" in udf.columns else ("user" if "user" in udf.columns else None)
+        if not col:
+            raise ValueError(f"Expected a 'user_id' or 'user' column, got {list(udf.columns)}")
+        uploaded_user_ids = (
+            udf[col].dropna().astype(str).str.strip().replace({"": None}).dropna().unique().tolist()
+        )
+        st.sidebar.success(f"Loaded {len(uploaded_user_ids)} user_ids.")
+    except Exception as e:
+        st.sidebar.warning(f"Could not read user CSV: {e}")
+
+
+
+
 ensure_bundle_extracted()
 try:
     bundle = _load_bundle()
@@ -188,20 +211,37 @@ except Exception as e:
     st.error(f"Failed to load offline bundle: {e}")
     st.stop()
 
-# ---------------- MAIN LAYOUT ----------------
+
+MAP_ITEM_CANDIDATES = [
+    os.path.join(BUNDLE_ROOT_A, "map_item", "map_item.csv"),
+    os.path.join(BUNDLE_ROOT_B, "map_item", "map_item.csv"),
+    MAP_ITEM,  #original repo path
+]
+MAP_ITEM_PATH = next((p for p in MAP_ITEM_CANDIDATES if os.path.exists(p)), None)
+
+
+#main
 colL, colR = st.columns([1, 2], gap="large")
 
 with colL:
     st.subheader("Pick a user")
 
     available_users = get_available_users(n=100)
+    if uploaded_user_ids:
+        available_users = sorted(set(available_users) | set(uploaded_user_ids))
+    
     if not available_users:
-        st.error("No users found in the bundle’s map_user. Make sure the zip extracted correctly.")
+        st.error("No users found in the bundle’s map_user (or uploaded CSV). Make sure the zip extracted correctly.")
         st.stop()
-
+    
     user = st.selectbox("User ID", options=available_users, index=0)
+    manual_user = st.text_input("Or paste a user_id")
+    if manual_user.strip():
+        user = manual_user.strip()
+    
     k = st.slider("Top-K", min_value=3, max_value=20, value=10, step=1)
     show_idx = st.toggle("Show internal IDs", value=False)
+
 
     st.markdown("**Exclude seen items (optional)**")
     seen_up = st.file_uploader(
@@ -224,7 +264,7 @@ with colL:
 with colR:
     st.subheader("Top-K Recommendations")
 
-    # Compute recommendations with the pure-NumPy offline engine
+    #compute recommendations
     res = recommend(bundle, user_id=str(user), k=k, seen_df=seen_df)
     items = pd.DataFrame(res.get("items", []))
 
@@ -232,11 +272,10 @@ with colR:
         st.info("No recommendations for this user (or all were excluded as seen). Try another user.")
         st.stop()
 
-    # Try to attach a readable item name from optional MAP_ITEM CSV
     readable_col = None
     try:
-        if os.path.exists(MAP_ITEM):
-            mi = pd.read_csv(MAP_ITEM)
+        if MAP_ITEM_PATH and os.path.exists(MAP_ITEM_PATH):
+            mi = pd.read_csv(MAP_ITEM_PATH)
             for c in ["name", "business_name", "title", "item_name"]:
                 if c in mi.columns:
                     readable_col = c
@@ -246,7 +285,8 @@ with colR:
     except Exception:
         pass
 
-    # Choose presentation
+
+
     if show_idx or readable_col is None:
         table = items[["item_id", "score"]].rename(columns={"item_id": "item_id (internal)"})
         y_field = "item_id (internal)"
@@ -258,10 +298,10 @@ with colR:
         y_title = "Recommended item"
         df_for_chart = table.rename(columns={"recommended_item": "label_for_chart"})
 
-    # Table
+    #Table
     st.dataframe(table, width="stretch", hide_index=True)
 
-    # Chart
+    #Chart
     chart = (
         alt.Chart(df_for_chart)
         .mark_bar()
@@ -273,7 +313,7 @@ with colR:
     )
     st.altair_chart(chart, use_container_width=True)
 
-    # Download
+    #Download
     st.download_button(
         "Download this Top-K CSV",
         data=table.to_csv(index=False).encode("utf-8"),
@@ -286,11 +326,11 @@ if show_idx:
     with st.expander("Show raw recommendation rows"):
         st.dataframe(items, width="stretch")
 
-# ---------------- METRICS PANEL ----------------
+#METRICS PANEL
 st.divider()
 render_metrics_from_local()
 
-# ---------------- OFFLINE BUNDLE SECTION ----------------
+#OFFLINE BUNDLE SECTION
 st.divider()
 st.subheader("Offline serving bundle")
 st.caption(
@@ -316,7 +356,7 @@ with st.expander("How to use the bundle (local quickstart)"):
         """
     )
 
-# ---------------- SYNC LATEST CLOUD METRICS ----------------
+#SYNC LATEST CLOUD METRICS
 st.subheader("Sync latest cloud metrics")
 HAS_GCLOUD = shutil.which("gcloud") is not None
 BEST_METRICS = f"{BUCKET}/artifacts/runs/best/metrics/metrics.json"
@@ -338,7 +378,7 @@ else:
                 st.caption(BEST_METRICS)
                 render_metrics_from_local()
             else:
-                # Fallback: look for latest part file
+                #Fallback
                 ok_ls, out_ls = _run_gcloud(["storage", "ls", "--recursive", f"{BUCKET}/artifacts/"])
                 if not ok_ls or not out_ls:
                     st.warning("No metrics found in GCS (yet) or no access.")
@@ -359,7 +399,7 @@ else:
                         else:
                             st.error("Failed to pull metrics from GCS. Ensure you’re authenticated (gcloud auth login).")
 
-# ---------------- ABOUT / MAPPING ----------------
+#ABOUT / MAPPING
 st.divider()
 st.markdown(
     """
