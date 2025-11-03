@@ -1,6 +1,6 @@
 # CityEats‑ALS — Scalable Food Recommender System  
 **Developed by [Srivatsav Shrikanth](https://github.com/srivatsav-99)**  
-*Machine Learning Engineer | Humber College & Boston University MET*  
+*Humber College & Boston University MET*  
 
 ---
 
