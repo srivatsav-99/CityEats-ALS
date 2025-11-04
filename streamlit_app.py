@@ -18,7 +18,7 @@ from src.serving.offline_recs import load_bundle, recommend
 
 #UI CONFIG
 st.set_page_config(page_title="CityEats-ALS - Demo", layout="wide")
-st.title("CityEats-ALS — Scalable Food Recommender (Demo)")
+st.title("CityEats-ALS - Scalable Food Recommender (Demo)")
 st.caption("Streamlit demo using the frozen offline bundle (no Spark). Built by Srivatsav Shrikanth.")
 
 #PATHS / CONSTANTS
