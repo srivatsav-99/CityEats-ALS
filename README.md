@@ -1,4 +1,4 @@
-# CityEats‑ALS — Scalable Food Recommender System  
+# CityEats‑ALS - Scalable Food Recommender System  
 **Developed by [Srivatsav Shrikanth](https://github.com/srivatsav-99)**  
 *Humber College & Boston University MET*  
 
